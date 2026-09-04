@@ -43,6 +43,24 @@ import kotlin.time.TimeSource
 private fun visibleSessionList(source: ObservableList<DshSession>): ObservableList<DshSession> =
     ObservableList<DshSession>().also { result -> result.addAll(source.filterNot { it.blank }) }
 
+private fun mainSessionList(
+    source: ObservableList<DshSession>,
+    archived: ObservableList<DshSession>,
+): ObservableList<DshSession> {
+    val archivedIds = archived.map { it.id }.toSet()
+    return ObservableList<DshSession>().also { result ->
+        result.addAll(source.filterNot { it.blank || archivedIds.contains(it.id) })
+    }
+}
+
+internal fun dshNextUnarchivedSession(
+    sessions: List<DshSession>,
+    archivedIds: Set<String>,
+    excludedId: String,
+): DshSession? =
+    sessions.firstOrNull { !it.blank && it.id != excludedId && !archivedIds.contains(it.id) }
+        ?: sessions.firstOrNull { it.blank && it.id != excludedId && !archivedIds.contains(it.id) }
+
 internal fun visibleSkillList(source: ObservableList<DshSkill>, query: String): ObservableList<DshSkill> =
     ObservableList<DshSkill>().also { result -> result.addAll(source.filter { it.name.startsWith(query) }) }
 
@@ -306,6 +324,15 @@ internal class DshHomePage : BasePager() {
     private var jobsNow by observable(0L)
     private var jobsClockScheduled by observable(false)
     private val workspaceGroups by observableList<DshWorkspaceGroup>()
+    private val archivedSessions by observableList<DshSession>()
+    private var archivedSessionsVisible by observable(false)
+    private var activeSessionArchived by observable(false)
+    private var sessionManageTargetId by observable("")
+    private var sessionRenameTargetId by observable("")
+    private var sessionRenameDraft by observable("")
+    private var sessionArchiveTargetId by observable("")
+    private var sessionActionBusy by observable(false)
+    private var sessionActionError by observable("")
     private val skills by observableList<DshSkill>()
     private var goalSnapshot by observable<DshGoalSnapshot?>(null)
     private var goalActionBusy by observable(false)
@@ -431,7 +458,7 @@ internal class DshHomePage : BasePager() {
                             }
                             vif({ ctx.isRemoteHost }) {
                                 DshSessionRail(
-                                    sessions = { ctx.sessions },
+                                    sessions = { mainSessionList(ctx.sessions, ctx.archivedSessions) },
                                     activeId = { ctx.activeSessionId },
                                     compact = false,
                                     onSelect = { id ->
@@ -545,6 +572,9 @@ internal class DshHomePage : BasePager() {
                                     running = { ctx.sessionRunning },
                                     queueCount = { ctx.queueItems.size },
                                     jobCount = { ctx.jobItems.size },
+                                    archived = { ctx.activeSessionArchived },
+                                    onRename = { ctx.openSessionRename(ctx.activeSessionId) },
+                                    onArchive = { ctx.openSessionArchive(ctx.activeSessionId) },
                                 )
                             }
                         }
@@ -662,6 +692,7 @@ internal class DshHomePage : BasePager() {
                     DshSessionDrawer(
                         sessions = { ctx.sessions },
                         workspaceGroups = { ctx.workspaceGroups },
+                        archivedSessions = { ctx.archivedSessions },
                         isWebTimeline = { ctx.isRemoteHost },
                         activeId = { ctx.activeSessionId },
                         animated = { ctx.sessionDrawerAnimated },
@@ -669,6 +700,11 @@ internal class DshHomePage : BasePager() {
                         onOpenSettings = { ctx.openConnectionSettings() },
                         onOpenAppearance = { ctx.appearanceVisible = true },
                         onNewSession = { ctx.createSession() },
+                        onOpenArchived = { ctx.archivedSessionsVisible = true },
+                        onManage = {
+                            ctx.archivedSessionsVisible = false
+                            ctx.openSessionManage(it)
+                        },
                         onSelect = { id ->
                             ctx.closeSessionDrawer()
                             setTimeout(ctx.pagerId, 0) {
@@ -844,6 +880,70 @@ internal class DshHomePage : BasePager() {
                         }
                     }
                 }
+                vif({ ctx.sessionManageTargetId.isNotEmpty() && ctx.isRemoteHost }) {
+                    DshSessionManageModal(
+                        title = {
+                            ctx.sessions.firstOrNull { it.id == ctx.sessionManageTargetId }?.title
+                                ?: "会话"
+                        },
+                        archived = {
+                            ctx.archivedSessions.any { it.id == ctx.sessionManageTargetId }
+                        },
+                        onRename = {
+                            val id = ctx.sessionManageTargetId
+                            ctx.sessionManageTargetId = ""
+                            ctx.openSessionRename(id)
+                        },
+                        onArchive = {
+                            val id = ctx.sessionManageTargetId
+                            ctx.sessionManageTargetId = ""
+                            ctx.openSessionArchive(id)
+                        },
+                        onClose = { ctx.sessionManageTargetId = "" },
+                    )
+                }
+                vif({ ctx.sessionRenameTargetId.isNotEmpty() && ctx.isRemoteHost }) {
+                    DshSessionRenameModal(
+                        draft = { ctx.sessionRenameDraft },
+                        busy = { ctx.sessionActionBusy },
+                        error = { ctx.sessionActionError },
+                        onDraftChange = {
+                            ctx.sessionRenameDraft = it
+                            ctx.sessionActionError = ""
+                        },
+                        onSave = { ctx.saveSessionRename() },
+                        onClose = { ctx.closeSessionActionModals() },
+                    )
+                }
+                vif({ ctx.sessionArchiveTargetId.isNotEmpty() && ctx.isRemoteHost }) {
+                    DshSessionArchiveModal(
+                        title = {
+                            ctx.sessions.firstOrNull { it.id == ctx.sessionArchiveTargetId }?.title
+                                ?: "此会话"
+                        },
+                        busy = { ctx.sessionActionBusy },
+                        error = { ctx.sessionActionError },
+                        onConfirm = { ctx.confirmSessionArchive() },
+                        onClose = { ctx.closeSessionActionModals() },
+                    )
+                }
+                vif({ ctx.archivedSessionsVisible && ctx.isRemoteHost }) {
+                    DshArchivedSessionsModal(
+                        sessions = { ctx.archivedSessions },
+                        activeId = { ctx.activeSessionId },
+                        onSelect = { id ->
+                            ctx.archivedSessionsVisible = false
+                            ctx.activeSessionArchived = true
+                            ctx.closeSessionDrawer()
+                            setTimeout(ctx.pagerId, 0) { ctx.selectSession(id) }
+                        },
+                        onManage = {
+                            ctx.archivedSessionsVisible = false
+                            ctx.openSessionManage(it)
+                        },
+                        onClose = { ctx.archivedSessionsVisible = false },
+                    )
+                }
             }
         }
     }
@@ -908,13 +1008,20 @@ internal class DshHomePage : BasePager() {
             sessions.addAll(loaded)
             runCatching { localStore?.replaceSessions(activeConnectionId, loaded) }
             preloadAllSessionMessages()
+            refreshWorkspaceGroups()
             connectionLabel = if (loaded.isEmpty()) "已连接 · 无会话" else "已连接 · 正在同步远程历史"
             if (loaded.isNotEmpty()) {
-                activeSessionId = loaded.firstOrNull { it.id == preferredSessionId }?.id
-                    ?: loaded.firstOrNull { !it.blank }?.id
-                    ?: loaded.first().id
+                val archivedIds = archivedSessions.map { it.id }.toSet()
+                val preferred = loaded.firstOrNull {
+                    it.id == preferredSessionId &&
+                        (activeSessionArchived || !archivedIds.contains(it.id))
+                }
+                val selected = preferred
+                    ?: dshNextUnarchivedSession(loaded, archivedIds, excludedId = "")
+                    ?: loaded.first()
+                activeSessionId = selected.id
+                activeSessionArchived = archivedIds.contains(selected.id)
                 sessionRunning = loaded.firstOrNull { it.id == activeSessionId }?.running == true
-                refreshWorkspaceGroups()
                 refreshQueueDock()
                 refreshJobsPanel()
                 refreshPendingInteractions()
@@ -1126,6 +1233,7 @@ internal class DshHomePage : BasePager() {
                     loadModels(activeSessionId)
                 }
             },
+            onArchivedSessionsChanged = { handleArchivedSessionsChanged() },
             onPendingInteraction = { sessionId ->
                 DshStreamLog.question("ui.pending-frame session=$sessionId active=$activeSessionId")
                 if (sessionId == activeSessionId) {
@@ -1449,6 +1557,7 @@ internal class DshHomePage : BasePager() {
             sessions.firstOrNull { it.blank }
         }
         if (blankSession != null) {
+            activeSessionArchived = false
             if (blankSession.id != activeSessionId) {
                 selectSession(blankSession.id)
             } else {
@@ -1476,6 +1585,7 @@ internal class DshHomePage : BasePager() {
             }
             runCatching { localStore?.replaceSessions(activeConnectionId, sessions.toList()) }
             activeSessionId = sessionId
+            activeSessionArchived = false
             messages = ObservableList()
             sessionMessageStates[sessionId] = messages
             sessionMessageReady.add(sessionId)
@@ -1924,12 +2034,29 @@ internal class DshHomePage : BasePager() {
     private fun refreshWorkspaceGroups() {
         if (!isRemoteHost) {
             workspaceGroups.clear()
+            archivedSessions.clear()
+            activeSessionArchived = false
             return
         }
         val repository = repository as? DshRemoteRepository ?: return
         val groups = repository.workspaceGroups()
         workspaceGroups.clear()
         workspaceGroups.addAll(groups)
+        archivedSessions.clear()
+        archivedSessions.addAll(repository.archivedSessions())
+    }
+
+    private fun handleArchivedSessionsChanged() {
+        val repository = repository as? DshRemoteRepository ?: return
+        refreshWorkspaceGroups()
+        if (sessionActionBusy && sessionArchiveTargetId == activeSessionId) return
+        if (activeSessionArchived || !repository.store.archivedSessionIds.contains(activeSessionId)) return
+        val next = dshNextUnarchivedSession(
+            sessions = sessions.toList(),
+            archivedIds = repository.store.archivedSessionIds,
+            excludedId = activeSessionId,
+        )
+        if (next != null) selectSession(next.id) else createSession()
     }
 
     private fun refreshPendingInteractions() {
@@ -2160,24 +2287,93 @@ internal class DshHomePage : BasePager() {
         }
     }
 
-    private fun renameActiveSession() {
+    private fun openSessionManage(sessionId: String) {
+        if (!isRemoteHost || sessions.none { it.id == sessionId }) return
+        sessionManageTargetId = sessionId
+    }
+
+    private fun openSessionRename(sessionId: String) {
+        val current = sessions.firstOrNull { it.id == sessionId } ?: return
+        if (!isRemoteHost) return
+        sessionRenameTargetId = sessionId
+        sessionRenameDraft = current.title.takeUnless { it == "尚无标题" || it == "新会话" }.orEmpty()
+        sessionActionError = ""
+    }
+
+    private fun saveSessionRename() {
         val repository = repository as? DshRemoteRepository ?: return
-        val current = sessions.firstOrNull { it.id == activeSessionId } ?: return
-        val title = current.title.takeIf { it != "尚无标题" && it != "新会话" } ?: ""
-        if (title.isBlank()) return
-        repository.renameSession(activeSessionId, title) { _, _ ->
-            setTimeout(pagerId, 0) { loadRepository(preferredSessionId = activeSessionId) }
+        val sessionId = sessionRenameTargetId
+        if (sessionId.isEmpty() || sessionActionBusy) return
+        val title = sessionRenameDraft.trim()
+        if (title.isEmpty()) {
+            sessionActionError = "会话名称不能为空"
+            return
+        }
+        sessionActionBusy = true
+        sessionActionError = ""
+        repository.renameSession(sessionId, title) { _, error ->
+            setTimeout(pagerId, 0) {
+                sessionActionBusy = false
+                if (error != null) {
+                    sessionActionError = if (error.code == "title-invalid") {
+                        "会话名称不能为空"
+                    } else {
+                        error.message
+                    }
+                    return@setTimeout
+                }
+                val updated = repository.store.sessions[sessionId]
+                val index = sessions.indexOfFirst { it.id == sessionId }
+                if (updated != null && index >= 0) sessions[index] = updated
+                refreshWorkspaceGroups()
+                closeSessionActionModals()
+            }
         }
     }
 
-    private fun archiveActiveSession() {
+    private fun openSessionArchive(sessionId: String) {
+        if (!isRemoteHost || archivedSessions.any { it.id == sessionId }) return
+        sessionArchiveTargetId = sessionId
+        sessionActionError = ""
+    }
+
+    private fun confirmSessionArchive() {
         val repository = repository as? DshRemoteRepository ?: return
-        repository.archiveSession(activeSessionId) { _, _ ->
+        val sessionId = sessionArchiveTargetId
+        if (sessionId.isEmpty() || sessionActionBusy) return
+        sessionActionBusy = true
+        sessionActionError = ""
+        repository.archiveSession(sessionId) { _, error ->
             setTimeout(pagerId, 0) {
-                loadRepository(preferredSessionId = null)
+                sessionActionBusy = false
+                if (error != null) {
+                    sessionActionError = error.message
+                    return@setTimeout
+                }
+                val wasActive = activeSessionId == sessionId
+                val next = dshNextUnarchivedSession(
+                    sessions = sessions.toList(),
+                    archivedIds = repository.store.archivedSessionIds,
+                    excludedId = sessionId,
+                )
+                if (wasActive) activeSessionArchived = true
+                closeSessionActionModals()
                 refreshWorkspaceGroups()
+                if (wasActive) {
+                    if (next != null) selectSession(next.id)
+                    else createSession()
+                }
             }
         }
+    }
+
+    private fun closeSessionActionModals() {
+        if (sessionActionBusy) return
+        sessionManageTargetId = ""
+        sessionRenameTargetId = ""
+        sessionRenameDraft = ""
+        sessionArchiveTargetId = ""
+        sessionActionError = ""
     }
 
     private fun forkActiveSession() {
@@ -2446,6 +2642,9 @@ internal class DshHomePage : BasePager() {
         ensureConversationPanel(id)
         messages = nextMessages
         activeSessionId = id
+        activeSessionArchived =
+            (repository as? DshRemoteRepository)?.store?.archivedSessionIds?.contains(id) == true
+        sessionRunning = sessions.firstOrNull { it.id == id }?.running == true
         perfLog("switch.$traceId.active-state-swapped", startedAt)
         scrollMessagesToEnd()
         addTaskWhenPagerUpdateLayoutFinish {
@@ -2809,6 +3008,7 @@ internal class DshHomePage : BasePager() {
                 sessions.add(DshSession(sessionId, "新会话", "Host", "", blank = true))
                 runCatching { localStore?.replaceSessions(activeConnectionId, sessions.toList()) }
                 activeSessionId = sessionId
+                activeSessionArchived = false
                 loadModels(sessionId)
                 sendDraft()
             }, { error ->
@@ -3522,6 +3722,7 @@ private fun ViewContainer<*, *>.DshCredentialSetupModal(
 private fun ViewContainer<*, *>.DshSessionDrawer(
     sessions: () -> ObservableList<DshSession>,
     workspaceGroups: () -> ObservableList<DshWorkspaceGroup>,
+    archivedSessions: () -> ObservableList<DshSession>,
     isWebTimeline: () -> Boolean,
     activeId: () -> String,
     animated: () -> Boolean,
@@ -3529,6 +3730,8 @@ private fun ViewContainer<*, *>.DshSessionDrawer(
     onOpenSettings: () -> Unit,
     onOpenAppearance: () -> Unit,
     onNewSession: () -> Unit,
+    onOpenArchived: () -> Unit,
+    onManage: (String) -> Unit,
     onSelect: (String) -> Unit,
 ) {
     Modal(inWindow = true) {
@@ -3649,6 +3852,46 @@ private fun ViewContainer<*, *>.DshSessionDrawer(
                     color(tokens.captionText)
                 }
             }
+            vif({ isWebTimeline() }) {
+                View {
+                    attr {
+                        height(40f)
+                        marginBottom(8f)
+                        flexDirectionRow()
+                        alignItemsCenter()
+                        paddingLeft(12f)
+                        paddingRight(12f)
+                        borderRadius(9f)
+                        backgroundColor(tokens.surfaceVariant)
+                    }
+                    Text {
+                        attr {
+                            text("已归档会话")
+                            flex(1f)
+                            fontSize(13f)
+                            color(tokens.secondaryText)
+                        }
+                    }
+                    Text {
+                        attr {
+                            text("${archivedSessions().size}")
+                            fontSize(12f)
+                            color(tokens.tertiaryText)
+                        }
+                    }
+                    event { click { onOpenArchived() } }
+                }
+            }
+            vif({ !isWebTimeline() }) {
+                Text {
+                    attr {
+                        text("重命名与归档仅在远程 Host 模式可用")
+                        marginBottom(8f)
+                        fontSize(11f)
+                        color(tokens.tertiaryText)
+                    }
+                }
+            }
             Scroller {
                 attr { flex(1f) }
                 vif({ !isWebTimeline() }) {
@@ -3685,6 +3928,7 @@ private fun ViewContainer<*, *>.DshSessionDrawer(
                                     subtitle = if (session.cwd.isEmpty()) group.title else session.cwd,
                                     active = activeId() == session.id,
                                     running = session.running,
+                                    onManage = { onManage(session.id) },
                                     onSelect = { onSelect(session.id) },
                                 )
                             }
@@ -3708,6 +3952,7 @@ private fun ViewContainer<*, *>.DshSessionDrawerRow(
     subtitle: String,
     active: Boolean,
     running: Boolean,
+    onManage: (() -> Unit)? = null,
     onSelect: () -> Unit,
 ) {
     View {
@@ -3752,8 +3997,373 @@ private fun ViewContainer<*, *>.DshSessionDrawerRow(
                     color(tokens.tertiaryText)
                 }
             }
+            if (onManage != null) {
+                event { click { onSelect() } }
+            }
         }
-        event { click { onSelect() } }
+        if (onManage == null) {
+            event { click { onSelect() } }
+        } else {
+            Text {
+                attr {
+                    text("管理")
+                    width(42f)
+                    height(32f)
+                    textAlignCenter()
+                    fontSize(11f)
+                    color(tokens.primary)
+                }
+                event { click { onManage() } }
+            }
+        }
+    }
+}
+
+private fun ViewContainer<*, *>.DshSessionManageModal(
+    title: () -> String,
+    archived: () -> Boolean,
+    onRename: () -> Unit,
+    onArchive: () -> Unit,
+    onClose: () -> Unit,
+) {
+    Modal(inWindow = true) {
+        attr {
+            absolutePositionAllZero()
+            allCenter()
+            paddingLeft(20f)
+            paddingRight(20f)
+            backgroundColor(tokens.scrim)
+        }
+        View {
+            attr {
+                width(pagerData.pageViewWidth - 40f)
+                maxWidth(420f)
+                padding(20f)
+                borderRadius(16f)
+                backgroundColor(tokens.surface)
+            }
+            Text {
+                attr {
+                    text(title())
+                    fontSize(18f)
+                    fontWeightBold()
+                    color(tokens.primaryText)
+                    lines(2)
+                }
+            }
+            Text {
+                attr {
+                    text("重命名")
+                    height(42f)
+                    marginTop(18f)
+                    textAlignCenter()
+                    fontSize(14f)
+                    color(tokens.primary)
+                    backgroundColor(tokens.surfaceVariant)
+                    borderRadius(8f)
+                }
+                event { click { onRename() } }
+            }
+            vif({ !archived() }) {
+                Text {
+                    attr {
+                        text("归档")
+                        height(42f)
+                        marginTop(10f)
+                        textAlignCenter()
+                        fontSize(14f)
+                        color(tokens.error.foreground)
+                        backgroundColor(tokens.surfaceVariant)
+                        borderRadius(8f)
+                    }
+                    event { click { onArchive() } }
+                }
+            }
+            Text {
+                attr {
+                    text("取消")
+                    height(40f)
+                    marginTop(12f)
+                    textAlignCenter()
+                    fontSize(14f)
+                    color(tokens.secondaryText)
+                }
+                event { click { onClose() } }
+            }
+        }
+    }
+}
+
+private fun ViewContainer<*, *>.DshSessionRenameModal(
+    draft: () -> String,
+    busy: () -> Boolean,
+    error: () -> String,
+    onDraftChange: (String) -> Unit,
+    onSave: () -> Unit,
+    onClose: () -> Unit,
+) {
+    Modal(inWindow = true) {
+        attr {
+            absolutePositionAllZero()
+            allCenter()
+            paddingLeft(20f)
+            paddingRight(20f)
+            backgroundColor(tokens.scrim)
+        }
+        View {
+            attr {
+                width(pagerData.pageViewWidth - 40f)
+                maxWidth(420f)
+                padding(20f)
+                borderRadius(16f)
+                backgroundColor(tokens.surface)
+            }
+            Text {
+                attr {
+                    text("重命名会话")
+                    fontSize(18f)
+                    fontWeightBold()
+                    color(tokens.primaryText)
+                }
+            }
+            Input {
+                attr {
+                    height(40f)
+                    marginTop(14f)
+                    fontSize(14f)
+                    color(tokens.primaryText)
+                    placeholder("输入会话名称")
+                    placeholderColor(tokens.tertiaryText)
+                    text(draft())
+                    returnKeyTypeDone()
+                }
+                event {
+                    textDidChange { onDraftChange(it.text) }
+                    inputReturn { if (!busy()) onSave() }
+                }
+            }
+            vif({ error().isNotEmpty() }) {
+                Text {
+                    attr {
+                        text(error())
+                        marginTop(8f)
+                        fontSize(12f)
+                        lineHeight(18f)
+                        color(tokens.error.foreground)
+                    }
+                }
+            }
+            View {
+                attr {
+                    height(40f)
+                    marginTop(18f)
+                    flexDirectionRow()
+                    justifyContentFlexEnd()
+                }
+                Text {
+                    attr {
+                        text("取消")
+                        width(78f)
+                        height(38f)
+                        textAlignCenter()
+                        fontSize(14f)
+                        color(tokens.secondaryText)
+                    }
+                    event { click { if (!busy()) onClose() } }
+                }
+                Text {
+                    attr {
+                        text(if (busy()) "保存中..." else "保存")
+                        width(88f)
+                        height(38f)
+                        marginLeft(8f)
+                        textAlignCenter()
+                        fontSize(14f)
+                        color(if (busy()) tokens.primaryDisabled else tokens.primary)
+                    }
+                    event { click { if (!busy()) onSave() } }
+                }
+            }
+        }
+    }
+}
+
+private fun ViewContainer<*, *>.DshSessionArchiveModal(
+    title: () -> String,
+    busy: () -> Boolean,
+    error: () -> String,
+    onConfirm: () -> Unit,
+    onClose: () -> Unit,
+) {
+    Modal(inWindow = true) {
+        attr {
+            absolutePositionAllZero()
+            allCenter()
+            paddingLeft(20f)
+            paddingRight(20f)
+            backgroundColor(tokens.scrim)
+        }
+        View {
+            attr {
+                width(pagerData.pageViewWidth - 40f)
+                maxWidth(420f)
+                padding(20f)
+                borderRadius(16f)
+                backgroundColor(tokens.surface)
+            }
+            Text {
+                attr {
+                    text("归档“${title()}”？")
+                    fontSize(18f)
+                    fontWeightBold()
+                    color(tokens.primaryText)
+                    lines(2)
+                }
+            }
+            Text {
+                attr {
+                    text("归档只会把此会话从主列表隐藏，不是永久删除。日志和工作区记账仍会保留，可在“已归档会话”中查看完整历史。")
+                    marginTop(10f)
+                    fontSize(13f)
+                    lineHeight(20f)
+                    color(tokens.secondaryText)
+                }
+            }
+            vif({ error().isNotEmpty() }) {
+                Text {
+                    attr {
+                        text(error())
+                        marginTop(8f)
+                        fontSize(12f)
+                        lineHeight(18f)
+                        color(tokens.error.foreground)
+                    }
+                }
+            }
+            View {
+                attr {
+                    height(40f)
+                    marginTop(18f)
+                    flexDirectionRow()
+                    justifyContentFlexEnd()
+                }
+                Text {
+                    attr {
+                        text("取消")
+                        width(78f)
+                        height(38f)
+                        textAlignCenter()
+                        fontSize(14f)
+                        color(tokens.secondaryText)
+                    }
+                    event { click { if (!busy()) onClose() } }
+                }
+                Text {
+                    attr {
+                        text(if (busy()) "归档中..." else "确认归档")
+                        width(104f)
+                        height(38f)
+                        marginLeft(8f)
+                        textAlignCenter()
+                        fontSize(14f)
+                        color(if (busy()) tokens.disabled.foreground else tokens.error.foreground)
+                    }
+                    event { click { if (!busy()) onConfirm() } }
+                }
+            }
+        }
+    }
+}
+
+private fun ViewContainer<*, *>.DshArchivedSessionsModal(
+    sessions: () -> ObservableList<DshSession>,
+    activeId: () -> String,
+    onSelect: (String) -> Unit,
+    onManage: (String) -> Unit,
+    onClose: () -> Unit,
+) {
+    Modal(inWindow = true) {
+        attr {
+            absolutePositionAllZero()
+            allCenter()
+            paddingLeft(16f)
+            paddingRight(16f)
+            backgroundColor(tokens.scrim)
+        }
+        View {
+            attr {
+                width(pagerData.pageViewWidth - 32f)
+                maxWidth(520f)
+                height((pagerData.pageViewHeight - 80f).coerceAtMost(620f))
+                padding(18f)
+                borderRadius(16f)
+                backgroundColor(tokens.background)
+            }
+            View {
+                attr {
+                    height(44f)
+                    flexDirectionRow()
+                    alignItemsCenter()
+                }
+                Text {
+                    attr {
+                        text("已归档会话")
+                        flex(1f)
+                        fontSize(18f)
+                        fontWeightBold()
+                        color(tokens.primaryText)
+                    }
+                }
+                Text {
+                    attr {
+                        text("关闭")
+                        width(52f)
+                        height(36f)
+                        textAlignCenter()
+                        fontSize(13f)
+                        color(tokens.primary)
+                    }
+                    event { click { onClose() } }
+                }
+            }
+            Text {
+                attr {
+                    text("这些会话仅从主列表隐藏，历史记录仍完整保留。")
+                    marginBottom(12f)
+                    fontSize(12f)
+                    color(tokens.secondaryText)
+                }
+            }
+            vif({ sessions().isEmpty() }) {
+                Text {
+                    attr {
+                        text("暂无已归档会话")
+                        marginTop(24f)
+                        textAlignCenter()
+                        fontSize(14f)
+                        color(tokens.tertiaryText)
+                    }
+                }
+            }
+            vif({ sessions().isNotEmpty() }) {
+                List {
+                    attr { flex(1f) }
+                    vforLazy({ sessions() }) { session, _, _ ->
+                        View {
+                            attr { height(52f) }
+                            DshSessionDrawerRow(
+                                title = session.title,
+                                subtitle = session.cwd.ifEmpty { "Host" },
+                                active = activeId() == session.id,
+                                running = session.running,
+                                onManage = { onManage(session.id) },
+                                onSelect = { onSelect(session.id) },
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -3957,14 +4567,14 @@ private fun ViewContainer<*, *>.DshSessionRail(
                     flex(1f)
                     flexDirectionRow()
                 }
-                vfor({ visibleSessionList(sessions()) }) { session ->
+                vfor({ sessions() }) { session ->
                     DshSessionButton(session, activeId() == session.id, onSelect)
                 }
             }
         } else {
             Scroller {
                 attr { flex(1f) }
-                vfor({ visibleSessionList(sessions()) }) { session ->
+                vfor({ sessions() }) { session ->
                     DshSessionButton(session, activeId() == session.id, onSelect)
                 }
             }
@@ -4002,6 +4612,9 @@ private fun ViewContainer<*, *>.DshSessionDetailsPanel(
     running: () -> Boolean,
     queueCount: () -> Int,
     jobCount: () -> Int,
+    archived: () -> Boolean,
+    onRename: () -> Unit,
+    onArchive: () -> Unit,
 ) {
     View {
         attr {
@@ -4045,6 +4658,34 @@ private fun ViewContainer<*, *>.DshSessionDetailsPanel(
         DshDetailRow("后台任务", "${jobCount()} 个")
         vif({ cwd().isNotEmpty() }) {
             DshDetailRow("目录", cwd())
+        }
+        View { attr { flex(1f) } }
+        Text {
+            attr {
+                text("重命名会话")
+                height(40f)
+                textAlignCenter()
+                fontSize(13f)
+                color(tokens.primary)
+                backgroundColor(tokens.surfaceVariant)
+                borderRadius(8f)
+            }
+            event { click { onRename() } }
+        }
+        vif({ !archived() }) {
+            Text {
+                attr {
+                    text("归档会话")
+                    height(40f)
+                    marginTop(10f)
+                    textAlignCenter()
+                    fontSize(13f)
+                    color(tokens.error.foreground)
+                    backgroundColor(tokens.surfaceVariant)
+                    borderRadius(8f)
+                }
+                event { click { onArchive() } }
+            }
         }
     }
 }
