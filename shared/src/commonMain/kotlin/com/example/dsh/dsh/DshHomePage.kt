@@ -97,6 +97,22 @@ internal class DshHomePage : BasePager() {
     private var apiKeyDraft by observable("")
     private var credentialSetupVisible by observable(false)
     private var appearanceVisible by observable(false)
+    private var pluginMenuVisible by observable(false)
+    private var pluginDetailId by observable("")
+    private var pluginConfirmAction by observable("")
+    private var pluginLoading by observable(false)
+    private var pluginRefreshing by observable(false)
+    private var pluginError by observable("")
+    private var pluginQuery by observable("")
+    private var pluginFilterId by observable(DshPluginFilter.ALL.id)
+    private var pluginWritable by observable(false)
+    private var pluginSource by observable("")
+    private val pluginEntries by observableList<DshPluginEntry>()
+    private val pluginVisibleEntries by observableList<DshPluginEntry>()
+    private val pluginPresets by observableList<DshPluginPreset>()
+    private var pluginPresetId by observable("")
+    private var pluginActionBusy by observable(false)
+    private var pluginActionError by observable("")
     private var credentialSetupBusy by observable(false)
     private var credentialSetupError by observable("")
     private var credentialSetupTitle by observable("添加一个 API Key 开始使用")
@@ -528,6 +544,7 @@ internal class DshHomePage : BasePager() {
                         onClose = { ctx.closeSessionDrawer() },
                         onOpenSettings = { ctx.openConnectionSettings() },
                         onOpenAppearance = { ctx.appearanceVisible = true },
+                        onOpenPlugins = { ctx.openPluginMenu() },
                         onNewSession = { ctx.createSession() },
                         onOpenArchived = { ctx.archivedSessionsVisible = true },
                         onManage = { ctx.openSessionManage(it) },
@@ -544,6 +561,53 @@ internal class DshHomePage : BasePager() {
                     DshAppearanceModal(
                         onSelect = { ctx.setThemePreference(it) },
                         onClose = { ctx.appearanceVisible = false },
+                    )
+                }
+
+                vif({ ctx.pluginMenuVisible && ctx.pluginDetailId.isEmpty() }) {
+                    DshPluginInventoryModal(
+                        loading = { ctx.pluginLoading },
+                        refreshing = { ctx.pluginRefreshing },
+                        error = { ctx.pluginError },
+                        query = { ctx.pluginQuery },
+                        filterId = { ctx.pluginFilterId },
+                        writable = { ctx.pluginWritable },
+                        source = { ctx.pluginSource },
+                        entries = { ctx.pluginEntries },
+                        visible = { ctx.pluginVisibleEntries },
+                        presets = { ctx.pluginPresets },
+                        presetId = { ctx.pluginPresetId },
+                        onQueryChange = { ctx.updatePluginQuery(it) },
+                        onFilterChange = { ctx.updatePluginFilter(it) },
+                        onPresetChange = { ctx.updatePluginPreset(it) },
+                        onRefresh = { ctx.loadPluginInventory(refresh = true) },
+                        onOpen = { ctx.openPluginDetail(it) },
+                        onClose = { ctx.closePluginMenu() },
+                    )
+                }
+
+                vif({ ctx.pluginMenuVisible && ctx.pluginDetailId.isNotEmpty() && ctx.pluginConfirmAction.isEmpty() }) {
+                    DshPluginDetailModal(
+                        entry = { ctx.selectedPlugin() },
+                        writable = { ctx.pluginWritable },
+                        busy = { ctx.pluginActionBusy },
+                        error = { ctx.pluginActionError },
+                        onBack = { ctx.pluginDetailId = "" },
+                        onClose = { ctx.closePluginMenu() },
+                        onEnable = { ctx.requestPluginControl("enable") },
+                        onDisable = { ctx.requestPluginControl("disable") },
+                        onReload = { ctx.requestPluginControl("reload") },
+                    )
+                }
+
+                vif({ ctx.pluginMenuVisible && ctx.pluginConfirmAction.isNotEmpty() }) {
+                    DshPluginConfirmModal(
+                        action = { ctx.pluginConfirmAction },
+                        entry = { ctx.selectedPlugin() },
+                        busy = { ctx.pluginActionBusy },
+                        error = { ctx.pluginActionError },
+                        onConfirm = { ctx.confirmPluginControl() },
+                        onClose = { ctx.pluginConfirmAction = ""; ctx.pluginActionError = "" },
                     )
                 }
 
@@ -813,6 +877,162 @@ internal class DshHomePage : BasePager() {
         sessionDrawerAnimated = false
         setTimeout(pagerId, ANIMATION_DURATION_MS) {
             sessionDrawerVisible = false
+        }
+    }
+
+    private fun openPluginMenu() {
+        closeSessionDrawer()
+        pluginMenuVisible = true
+        pluginDetailId = ""
+        pluginConfirmAction = ""
+        pluginActionError = ""
+        loadPluginInventory(refresh = pluginEntries.isNotEmpty())
+    }
+
+    private fun closePluginMenu() {
+        pluginMenuVisible = false
+        pluginDetailId = ""
+        pluginConfirmAction = ""
+        pluginActionBusy = false
+        pluginActionError = ""
+    }
+
+    private fun selectedPlugin(): DshPluginEntry? = pluginEntries.firstOrNull { it.entryId == pluginDetailId }
+
+    private fun openPluginDetail(entryId: String) {
+        pluginDetailId = entryId
+        pluginActionError = ""
+        pluginConfirmAction = ""
+        val remote = repository as? DshRemoteRepository ?: return
+        if (pluginSource != "admin") return
+        remote.getPlugin(entryId) { entry, _ ->
+            setTimeout(pagerId, 0) {
+                if (pluginDetailId != entryId || entry == null) return@setTimeout
+                val index = pluginEntries.indexOfFirst { it.entryId == entry.entryId }
+                if (index >= 0) pluginEntries[index] = entry else pluginEntries.add(entry)
+                refreshVisiblePlugins()
+            }
+        }
+    }
+
+    private fun updatePluginQuery(query: String) {
+        pluginQuery = query
+        refreshVisiblePlugins()
+    }
+
+    private fun updatePluginFilter(filterId: String) {
+        pluginFilterId = filterId
+        refreshVisiblePlugins()
+    }
+
+    private fun updatePluginPreset(presetId: String) {
+        pluginPresetId = presetId
+        refreshVisiblePlugins()
+    }
+
+    private fun refreshVisiblePlugins() {
+        val source = if (pluginPresetId.isEmpty()) {
+            pluginEntries.toList()
+        } else {
+            pluginPresets.firstOrNull { it.id == pluginPresetId }?.rows.orEmpty()
+        }
+        val next = filterPluginEntries(source, pluginQuery, DshPluginFilter.fromId(pluginFilterId))
+        pluginVisibleEntries.diffUpdate(next) { old, new -> old.entryId == new.entryId && old.moduleName == new.moduleName }
+        val count = minOf(pluginVisibleEntries.size, next.size)
+        for (index in 0 until count) {
+            if (pluginVisibleEntries[index] != next[index]) pluginVisibleEntries[index] = next[index]
+        }
+    }
+
+    private fun applyPluginSnapshot(snapshot: DshPluginSnapshot) {
+        pluginWritable = snapshot.writable
+        pluginSource = snapshot.source
+        pluginEntries.diffUpdate(snapshot.entries) { old, new -> old.entryId == new.entryId && old.moduleName == new.moduleName }
+        val entryCount = minOf(pluginEntries.size, snapshot.entries.size)
+        for (index in 0 until entryCount) {
+            if (pluginEntries[index] != snapshot.entries[index]) pluginEntries[index] = snapshot.entries[index]
+        }
+        pluginPresets.diffUpdate(snapshot.presets) { old, new -> old.id == new.id }
+        val presetCount = minOf(pluginPresets.size, snapshot.presets.size)
+        for (index in 0 until presetCount) {
+            if (pluginPresets[index] != snapshot.presets[index]) pluginPresets[index] = snapshot.presets[index]
+        }
+        if (pluginPresetId.isNotEmpty() && pluginPresets.none { it.id == pluginPresetId }) {
+            pluginPresetId = ""
+        }
+        refreshVisiblePlugins()
+    }
+
+    private fun loadPluginInventory(refresh: Boolean) {
+        val remote = repository as? DshRemoteRepository
+        if (remote == null) {
+            pluginLoading = false
+            pluginRefreshing = false
+            pluginError = "未连接到远程 DSH"
+            return
+        }
+        if (refresh) pluginRefreshing = true else pluginLoading = true
+        if (!refresh) pluginError = ""
+        remote.loadPluginInventory(
+            onSuccess = { snapshot ->
+                setTimeout(pagerId, 0) {
+                    pluginLoading = false
+                    pluginRefreshing = false
+                    pluginError = ""
+                    applyPluginSnapshot(snapshot)
+                }
+            },
+            onError = { message ->
+                setTimeout(pagerId, 0) {
+                    pluginLoading = false
+                    pluginRefreshing = false
+                    pluginError = message
+                    if (!refresh) {
+                        pluginEntries.clear()
+                        pluginVisibleEntries.clear()
+                        pluginPresets.clear()
+                    }
+                }
+            },
+        )
+    }
+
+    private fun requestPluginControl(action: String) {
+        if (!pluginWritable || selectedPlugin()?.protectedEntry == true) return
+        pluginConfirmAction = action
+        pluginActionError = ""
+    }
+
+    private fun confirmPluginControl() {
+        val remote = repository as? DshRemoteRepository ?: return
+        val entryId = pluginDetailId
+        val action = pluginConfirmAction
+        if (entryId.isEmpty() || action.isEmpty() || pluginActionBusy) return
+        pluginActionBusy = true
+        pluginActionError = ""
+        remote.controlPlugin(entryId, action, true) { entry, error ->
+            setTimeout(pagerId, 0) {
+                pluginActionBusy = false
+                if (error != null) {
+                    pluginActionError = error.message
+                    return@setTimeout
+                }
+                pluginConfirmAction = ""
+                pluginActionError = ""
+                if (entry != null) {
+                    val index = pluginEntries.indexOfFirst { it.entryId == entry.entryId }
+                    if (index >= 0) pluginEntries[index] = entry
+                    refreshVisiblePlugins()
+                }
+                bridgeModule.toast(
+                    when (action) {
+                        "enable" -> "已请求启用"
+                        "disable" -> "已请求停用"
+                        else -> "已请求重载"
+                    },
+                )
+                loadPluginInventory(refresh = true)
+            }
         }
     }
 

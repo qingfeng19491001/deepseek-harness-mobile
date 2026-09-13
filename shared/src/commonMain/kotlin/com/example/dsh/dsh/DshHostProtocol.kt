@@ -42,10 +42,40 @@ internal object DshHostProtocol {
     const val GOAL_CLEAR = "goal.clear"
     const val RESPOND_PATH = "$API_PREFIX/respond"
     const val SESSION_EXPORT_PATH = "$API_PREFIX/session.export"
+    const val PLUGIN_INVENTORY_LIST = "pluginInventory/list"
+    const val MOBILE_PLUGIN_RPC_PATH = "/dsh-mobile/rpc"
+    const val MOBILE_CAPABILITIES = "dsh.mobile.capabilities"
+    const val MOBILE_PLUGIN_INVENTORY = "dsh.plugin.inventory"
+    const val MOBILE_PLUGIN_GET = "dsh.plugin.get"
+    const val MOBILE_PLUGIN_CONTROL = "dsh.plugin.control"
 
 }
 
 internal data class DshHostConnection(val baseUrl: String, val token: String = "")
+
+internal fun parseHostRpcBody(
+    data: JSONObject,
+    method: String,
+    allowBareValue: Boolean = false,
+): Pair<JSONObject?, DshRpcError?> {
+    val result = data.optJSONObject("result")
+    if (result != null) {
+        if (!result.optBoolean("ok")) {
+            val error = result.optJSONObject("error")
+            return null to DshRpcError(
+                error?.optString("code").orEmpty().ifEmpty { "internal" },
+                error?.optString("message").orEmpty().ifEmpty { "$method 失败" },
+                error?.optJSONObject("details")?.toString() ?: "{}",
+            )
+        }
+        return result.optJSONObject("value") to null
+    }
+    if (allowBareValue) {
+        if (data.optJSONArray("entries") != null) return data to null
+        data.optJSONObject("value")?.let { return it to null }
+    }
+    return null to DshRpcError("bad-response", "$method 返回了非法 RPC 信封")
+}
 
 internal object DshWebTimelineParser {
     fun parseWebTimeline(events: JSONArray): List<DshWebTimelineItem> {
@@ -469,6 +499,41 @@ internal class DshHostConnectionRuntime(
         return DshRpcCall(rpcId) { queued.removeAll { it.rpcId == rpcId } }
     }
 
+    fun callPath(
+        path: String,
+        method: String,
+        payload: JSONObject,
+        callback: (JSONObject?, DshRpcError?, String) -> Unit,
+    ): DshRpcCall {
+        val myGeneration = generation
+        val rpcId = nextRpcId(myGeneration)
+        if (stopped) {
+            callback(null, DshRpcError("cancelled", "连接已停止"), rpcId)
+        } else if (!productReady) {
+            callback(null, DshRpcError("not-ready", "连接尚未就绪"), rpcId)
+        } else {
+            postRpc(myGeneration, path, method, payload, rpcId, typert = false, callback)
+        }
+        return DshRpcCall(rpcId)
+    }
+
+    fun callTypert(
+        method: String,
+        args: JSONObject,
+        callback: (JSONObject?, DshRpcError?, String) -> Unit,
+    ): DshRpcCall {
+        val myGeneration = generation
+        val rpcId = nextRpcId(myGeneration)
+        if (stopped) {
+            callback(null, DshRpcError("cancelled", "连接已停止"), rpcId)
+        } else if (!productReady) {
+            callback(null, DshRpcError("not-ready", "连接尚未就绪"), rpcId)
+        } else {
+            postRpc(myGeneration, "${DshHostProtocol.API_PREFIX}/$method", method, args, rpcId, typert = true, callback)
+        }
+        return DshRpcCall(rpcId)
+    }
+
     /** POST /api/respond has a ClientResponse body, not a unary RPC body. */
     fun respond(rpcId: String, value: JSONObject, callback: (Boolean, String) -> Unit) {
         if (rpcId.isEmpty()) {
@@ -613,46 +678,61 @@ internal class DshHostConnectionRuntime(
 
     private fun dispatch(request: QueuedRpc) {
         if (request.generation != generation || stopped) return
-        val body = JSONObject().apply {
-            put("type", "client-request")
-            put("rpcId", request.rpcId)
-            put("method", request.method)
-            put("payload", request.payload)
+        postRpc(
+            request.generation,
+            "${DshHostProtocol.API_PREFIX}/${request.method}",
+            request.method,
+            request.payload,
+            request.rpcId,
+            typert = false,
+            request.callback,
+        )
+    }
+
+    private fun postRpc(
+        myGeneration: Long,
+        path: String,
+        method: String,
+        payload: JSONObject,
+        rpcId: String,
+        typert: Boolean,
+        callback: (JSONObject?, DshRpcError?, String) -> Unit,
+    ) {
+        val body = if (typert) {
+            JSONObject().apply { put("args", payload) }
+        } else {
+            JSONObject().apply {
+                put("type", "client-request")
+                put("rpcId", rpcId)
+                put("method", method)
+                put("payload", payload)
+            }
         }
         val headers = JSONObject().apply {
             put("Content-Type", "application/json")
             if (connection.token.isNotEmpty()) put("Authorization", "Bearer ${connection.token}")
         }
         network.httpRequest(
-            "${connection.baseUrl.trimEnd('/')}${DshHostProtocol.API_PREFIX}/${request.method}",
+            "${connection.baseUrl.trimEnd('/')}$path",
             true, body, headers, null, REQUEST_TIMEOUT_SECONDS,
         ) { data, success, errorMsg, response ->
-            if (request.generation != generation || stopped) {
-                request.callback(null, DshRpcError("generation-cancelled", "请求所属连接世代已失效"), request.rpcId)
+            if (myGeneration != generation || stopped) {
+                callback(null, DshRpcError("generation-cancelled", "请求所属连接世代已失效"), rpcId)
                 return@httpRequest
             }
             if (!success) {
-                request.callback(null, DshRpcError(
-                    "transport-${response.statusCode ?: 0}",
-                    "${request.method} failed (${response.statusCode ?: 0}): $errorMsg",
-                ), request.rpcId)
+                callback(
+                    null,
+                    DshRpcError(
+                        "transport-${response.statusCode ?: 0}",
+                        "$method failed (${response.statusCode ?: 0}): $errorMsg",
+                    ),
+                    rpcId,
+                )
                 return@httpRequest
             }
-            val result = data.optJSONObject("result")
-            if (result == null) {
-                request.callback(null, DshRpcError("bad-response", "${request.method} 返回了非法 RPC 信封"), request.rpcId)
-                return@httpRequest
-            }
-            if (!result.optBoolean("ok")) {
-                val error = result.optJSONObject("error")
-                request.callback(null, DshRpcError(
-                    error?.optString("code").orEmpty().ifEmpty { "internal" },
-                    error?.optString("message").orEmpty().ifEmpty { "${request.method} 失败" },
-                    error?.optJSONObject("details")?.toString() ?: "{}",
-                ), request.rpcId)
-                return@httpRequest
-            }
-            request.callback(result.optJSONObject("value"), null, request.rpcId)
+            val (value, error) = parseHostRpcBody(data, method, allowBareValue = typert)
+            callback(value, error, rpcId)
         }
     }
 
@@ -677,7 +757,7 @@ internal class DshHostConnectionRuntime(
         onState(DshHostRuntimeState(phase, generation, muxOpen, hostOpen, message))
     }
 
-    private companion object {
+    companion object {
         const val REQUEST_TIMEOUT_SECONDS = 30
         const val RECONNECT_DELAY_MS = 1_000
     }
@@ -708,6 +788,8 @@ internal class DshRemoteHostRepository(
     private val onRemoteEventHandler = onRemoteEvent
     private val onArchivedSessionsChangedHandler = onArchivedSessionsChanged
     private val onPendingInteractionHandler = onPendingInteraction
+    private var mobilePluginAdmin: Boolean? = null
+    private var mobilePluginWritable: Boolean = false
     private val runtime = DshHostConnectionRuntime(
         network = network,
         webSocket = webSocket,
@@ -1487,6 +1569,126 @@ internal class DshRemoteHostRepository(
 
     private fun call(method: String, payload: JSONObject, callback: (JSONObject?, DshRpcError?) -> Unit) =
         runtime.call(method, payload) { value, error, _ -> callback(value, error) }
+
+    fun loadPluginInventory(onSuccess: (DshPluginSnapshot) -> Unit, onError: (String) -> Unit) {
+        when (mobilePluginAdmin) {
+            true -> loadAdminPluginInventory(onSuccess, onError, mobilePluginWritable)
+            false -> loadOfficialPluginInventory(onSuccess, onError)
+            null -> runtime.callPath(
+                DshHostProtocol.MOBILE_PLUGIN_RPC_PATH,
+                DshHostProtocol.MOBILE_CAPABILITIES,
+                JSONObject(),
+            ) { caps, capsError, _ ->
+                val available = capsError == null && caps != null && capabilitiesAllow(caps, "plugin.inventory")
+                if (available) {
+                    mobilePluginAdmin = true
+                    mobilePluginWritable = capabilitiesAllow(caps, "plugin.control")
+                    loadAdminPluginInventory(onSuccess, onError, mobilePluginWritable)
+                    return@callPath
+                }
+                if (shouldCacheAdminUnavailable(capsError)) mobilePluginAdmin = false
+                loadOfficialPluginInventory(onSuccess, onError)
+            }
+        }
+    }
+
+    fun getPlugin(entryId: String, callback: (DshPluginEntry?, DshRpcError?) -> Unit) {
+        if (mobilePluginAdmin != true) {
+            callback(null, DshRpcError("unavailable", "当前 Host 没有配套管理插件"))
+            return
+        }
+        runtime.callPath(
+            DshHostProtocol.MOBILE_PLUGIN_RPC_PATH,
+            DshHostProtocol.MOBILE_PLUGIN_GET,
+            JSONObject().apply { put("entryId", entryId) },
+        ) { value, error, _ ->
+            callback(value?.let(::parsePluginEntry), error)
+        }
+    }
+
+    fun controlPlugin(
+        entryId: String,
+        action: String,
+        confirm: Boolean,
+        callback: (DshPluginEntry?, DshRpcError?) -> Unit,
+    ) {
+        runtime.callPath(
+            DshHostProtocol.MOBILE_PLUGIN_RPC_PATH,
+            DshHostProtocol.MOBILE_PLUGIN_CONTROL,
+            JSONObject().apply {
+                put("entryId", entryId)
+                put("action", action)
+                put("confirm", confirm)
+            },
+        ) { value, error, _ ->
+            if (error != null) {
+                callback(null, error)
+                return@callPath
+            }
+            val entry = value?.optJSONObject("entry")?.let(::parsePluginEntry)
+            callback(entry, null)
+        }
+    }
+
+    private fun loadAdminPluginInventory(
+        onSuccess: (DshPluginSnapshot) -> Unit,
+        onError: (String) -> Unit,
+        writable: Boolean = true,
+    ) {
+        runtime.callPath(
+            DshHostProtocol.MOBILE_PLUGIN_RPC_PATH,
+            DshHostProtocol.MOBILE_PLUGIN_INVENTORY,
+            JSONObject(),
+        ) { value, error, _ ->
+            if (error != null || value == null) {
+                onError(pluginInventoryError(error?.message))
+            } else {
+                onSuccess(
+                    parsePluginSnapshot(
+                        value,
+                        source = "admin",
+                        writable = writable && value.optBoolean("writable", true),
+                    ),
+                )
+            }
+        }
+    }
+
+    private fun loadOfficialPluginInventory(onSuccess: (DshPluginSnapshot) -> Unit, onError: (String) -> Unit) {
+        runtime.callTypert(DshHostProtocol.PLUGIN_INVENTORY_LIST, JSONObject()) { value, error, _ ->
+            if (error == null && value != null) {
+                onSuccess(parseOfficialPluginSnapshot(value))
+                return@callTypert
+            }
+            call(DshHostProtocol.PLUGIN_INVENTORY_LIST, JSONObject()) { fallback, fallbackError ->
+                if (fallbackError != null || fallback == null) {
+                    onError(pluginInventoryError(fallbackError?.message ?: error?.message))
+                } else {
+                    onSuccess(parseOfficialPluginSnapshot(fallback))
+                }
+            }
+        }
+    }
+
+    private fun shouldCacheAdminUnavailable(error: DshRpcError?): Boolean {
+        if (error == null) return true
+        if (error.code == "cancelled" || error.code == "generation-cancelled" || error.code.contains("not-ready")) {
+            return false
+        }
+        val blob = "${error.code} ${error.message}"
+        return blob.contains("404") || error.code == "bad-response" || blob.contains("forbidden")
+    }
+
+    private fun pluginInventoryError(raw: String?): String {
+        val message = raw.orEmpty()
+        return when {
+            message.contains("not-ready") -> "还没连上 Host，请稍后再试"
+            message.contains("transport-404") || message.contains("404") ->
+                "Host 没有返回插件清单。确认电脑 DSH 已启动，并已安装官方插件清单或配套管理插件。"
+            message.isBlank() -> "无法读取插件列表"
+            else -> "无法读取插件列表：$message"
+        }
+    }
 
     private fun applyWorkspaceBaseline(value: JSONObject) {
         val archived = value.optJSONArray("archivedSessionIds")

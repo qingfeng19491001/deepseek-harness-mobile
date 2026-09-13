@@ -97,7 +97,7 @@ internal fun ViewContainer<*, *>.DshConnectionSettingsModal(
                 vif({ error().isNotEmpty() && !error().startsWith("首次连接需要确认主机指纹：") }) {
                     Text { attr { text(error()); marginTop(8f); fontSize(12f); lineHeight(18f); color(tokens.error.foreground) } }
                 }
-                View { attr { marginTop(18f); height(40f); flexDirectionRow(); justifyContentFlexEnd() }; Button { attr { width(132f); height(40f); borderRadius(8f); backgroundColor(if (busy()) tokens.primaryDisabled else tokens.primary); titleAttr { text(if (busy()) "连接中..." else "保存并连接"); fontSize(14f); color(tokens.onPrimary) } }; event { click { if (!busy()) onSave() } } } } }
+                View { attr { marginTop(18f); height(40f); flexDirectionRow(); justifyContentFlexEnd() }; Button { attr { width(132f); height(40f); borderRadius(8f); backgroundColor(if (busy()) tokens.primaryDisabled else tokens.primary); titleAttr { text(if (busy()) "连接中..." else "保存并连接"); fontSize(14f); color(tokens.onPrimary) } }; event { click { if (!busy()) onSave() } } } }
             }
         }
     }
@@ -289,6 +289,7 @@ internal fun ViewContainer<*, *>.DshSessionDrawer(
     onClose: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenAppearance: () -> Unit,
+    onOpenPlugins: () -> Unit,
     onNewSession: () -> Unit,
     onOpenArchived: () -> Unit,
     onManage: (String) -> Unit,
@@ -372,6 +373,29 @@ internal fun ViewContainer<*, *>.DshSessionDrawer(
                     }
                 }
                 event { click { onOpenAppearance() } }
+            }
+            View {
+                attr {
+                    height(42f)
+                    marginTop(8f)
+                    flexDirectionRow()
+                    alignItemsCenter()
+                    paddingLeft(12f)
+                    paddingRight(12f)
+                    borderRadius(9f)
+                    backgroundColor(Color.TRANSPARENT)
+                }
+                Image { attr { src(ImageUri.commonAssets("plugin.svg")); size(20f, 20f); tintColor(tokens.icon) } }
+                Text {
+                    attr {
+                        text("插件")
+                        marginLeft(10f)
+                        fontSize(14f)
+                        fontWeightMedium()
+                        color(tokens.secondaryText)
+                    }
+                }
+                event { click { onOpenPlugins() } }
             }
             View {
                 attr {

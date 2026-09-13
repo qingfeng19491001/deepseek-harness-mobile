@@ -21,6 +21,7 @@ DeepSeek Harness 本身是一个插件化 Agent 运行时。本仓库提供 Andr
 
 - 使用 Kuikly/Kotlin Multiplatform 实现主要 UI 和跨平台协议层；
 - 扫码 / SSH 远程模式用 HTTP RPC + WebSocket（`events.mux`）；
+- 侧栏「插件」展示电脑 Host 已加载插件；官方清单只读，安装 [`host-plugin/`](host-plugin/README.md) 后可查看配置、失败原因并安全启停；
 - 按连接模式隔离会话列表和消息缓存；
 - 通过扫码 Relay 或 SSH 隧道连接电脑上的 DSH Host。
 
@@ -245,6 +246,13 @@ npx @deepseek-ai/dsh plugin --profile web add "github:yukiykchen/dsh-scan-remote
 ```
 
 如果已经装过，可以跳过这一步。Settings 里没有 **Remote Access** 时，多半是插件没装到 `web` profile，或 Host 不是用这个 profile 启动的。
+
+可选：再装配套管理插件，手机侧栏「插件」才能看到配置摘要、失败原因，并安全启用 / 停用 / 重载（官方 `pluginInventory/list` 仍然只读）：
+
+```bash
+cd /path/to/deepseek-harness-mobile/host-plugin
+npx @deepseek-ai/dsh plugin --profile web add "link:$(pwd)"
+```
 
 ### 3. 写入手机能访问的电脑地址并启动 DSH
 
