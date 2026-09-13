@@ -65,6 +65,22 @@
     }];
 }
 
+- (void)pickImages:(NSDictionary *)args {
+    NSDictionary *params = [args[KR_PARAM_KEY] hr_stringToDictionary];
+    KuiklyRenderCallback callback = args[KR_CALLBACK_KEY];
+    [[DshImagePicker shared] pickImagesFrom:[DshNativeUi topViewController] params:params completion:^(NSDictionary *result) {
+        if (callback) callback(result ?: @{});
+    }];
+}
+
+- (void)captureImage:(NSDictionary *)args {
+    NSDictionary *params = [args[KR_PARAM_KEY] hr_stringToDictionary];
+    KuiklyRenderCallback callback = args[KR_CALLBACK_KEY];
+    [[DshImagePicker shared] captureImageFrom:[DshNativeUi topViewController] params:params completion:^(NSDictionary *result) {
+        if (callback) callback(result ?: @{});
+    }];
+}
+
 - (void)importSshKey:(NSDictionary *)args {
     NSDictionary *params = [args[KR_PARAM_KEY] hr_stringToDictionary];
     KuiklyRenderCallback callback = args[KR_CALLBACK_KEY];

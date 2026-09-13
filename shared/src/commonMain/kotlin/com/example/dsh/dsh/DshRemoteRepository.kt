@@ -95,6 +95,8 @@ internal class DshRemoteRepository(
         callback: (String?, String?) -> Unit,
     ) = delegate.loadAttachment(sessionId, attachmentId, callback)
 
+    fun imageLimits(): DshImageLimits? = delegate.store.imageLimits
+
     companion object {
         fun parseWebTimelineForTest(events: JSONArray): List<DshWebTimelineItem> =
             DshWebTimelineParser.parseWebTimeline(events)
@@ -225,7 +227,8 @@ internal class DshRemoteRepository(
         onDelta: (String) -> Unit,
         onComplete: (String) -> Unit,
         onError: (String) -> Unit,
-    ): DshStreamHandle = delegate.streamReply(pagerId, sessionId, prompt, onDelta, onComplete, onError)
+        images: List<DshPromptImagePart> = emptyList(),
+    ): DshStreamHandle = delegate.streamReply(pagerId, sessionId, prompt, onDelta, onComplete, onError, images)
 
     override fun streamReply(
         pagerId: String,
@@ -234,5 +237,6 @@ internal class DshRemoteRepository(
         onDelta: (String, Boolean) -> Unit,
         onComplete: (String) -> Unit,
         onError: (String) -> Unit,
-    ): DshStreamHandle = delegate.streamReply(pagerId, sessionId, prompt, onDelta, onComplete, onError)
+        images: List<DshPromptImagePart>,
+    ): DshStreamHandle = delegate.streamReply(pagerId, sessionId, prompt, onDelta, onComplete, onError, images)
 }

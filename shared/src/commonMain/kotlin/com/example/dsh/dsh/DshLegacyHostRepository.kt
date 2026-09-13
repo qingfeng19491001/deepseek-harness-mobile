@@ -181,6 +181,7 @@ internal class DshHostRepository(
         onDelta: (String, Boolean) -> Unit,
         onComplete: (String) -> Unit,
         onError: (String) -> Unit,
+        images: List<DshPromptImagePart>,
     ): DshStreamHandle {
         var closed = false
         var promptSent = false
@@ -214,7 +215,7 @@ internal class DshHostRepository(
             request(DshHostProtocol.SESSION_PROMPT, JSONObject().apply {
                 put("sessionId", sessionId)
                 put("mode", "queue")
-                put("content", JSONArray().apply { put(JSONObject().apply { put("type", "text"); put("text", prompt) }) })
+                put("content", dshPromptContent(prompt, images))
             }) { value, error ->
                 if (error != null) {
                     finish(error)

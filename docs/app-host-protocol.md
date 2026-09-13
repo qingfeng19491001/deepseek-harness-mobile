@@ -139,7 +139,7 @@ Authorization: Bearer <token>   // token 非空时
 
 ## 5. `session.prompt` 与流式
 
-当前 App **只发文本**：
+默认仍发文本：
 
 ```json
 {
@@ -151,13 +151,13 @@ Authorization: Bearer <token>   // token 非空时
 
 `mode` 固定 `queue`。若 Host 立刻返回 `command.kind == success`，当作 slash 命令完成，不再等流。
 
-官方图片通道（尚未从输入区发出）应是同一 `content` 数组里再加：
+官方图片通道走同一 `content` 数组。输入区选图 / 拍照后随 `session.prompt` 发出：
 
 ```json
 { "type": "image", "mediaType": "image/png", "data": "<canonical-base64>", "name": "photo.png" }
 ```
 
-只支持 PNG / JPEG / WebP / GIF。限额看 Host 的 `imageLimits` projection。PDF 等通用文件 **不在** 该协议里。
+只支持 PNG / JPEG / WebP / GIF。限额看 Host 的 `imageLimits` projection；发送前按张数、MIME、体积和像素预检，超限拦截并提示，不把原始 Base64、本地路径或临时 URL 写入会话历史。回看已发送图片用 `session.attachment` + `attachmentId`。HEIC 在设备端转 JPEG。PDF 等通用文件 **不在** 该协议里，App 也不假装支持。
 
 流式结果不走 prompt 的 HTTP 响应体，而走 mux 上的 `session/event`。App 用 prompt 的 `rpcId` 对上事件 `source.rpcId`。`turn/end` 结束一轮。重连后若 Host 仍在跑，用 `adoptLiveStream` 挂上现有 turn，不重新 prompt。
 
@@ -235,8 +235,7 @@ Authorization: Bearer <token>   // token 非空时
 
 ## 8. 明确未接或未发的
 
-- 发图：`session.attachment` 已能读历史图；输入区尚未把 `type: image` 放进 `session.prompt`
-- 通用文件 / PDF 上传：官方无此 RPC
+- 通用文件 / PDF 上传：官方无此 RPC，App 未扩展 Host 存储与引用格式
 - 插件安装 / 卸载：官方和配套管理插件都不提供；启停/重载见 `host-plugin/` 与 [dsh-mobile-plugin-protocol.md](dsh-mobile-plugin-protocol.md)
 - 永久删除会话：官方归档有，删除/恢复由 `dsh-scan-remote` 扩展 `workspace.deleteSession` / `workspace.unarchiveSession`；未装插件时 App 禁用入口
 - `session.prompt` 的 `mode: "steer"`：队列里的 steer 走 `session.updateQueue`，不是改 prompt mode

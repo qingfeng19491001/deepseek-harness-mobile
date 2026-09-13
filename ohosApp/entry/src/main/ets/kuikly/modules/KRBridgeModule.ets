@@ -9,7 +9,7 @@ import fs from '@ohos.file.fs';
 import router from '@ohos.router';
 import { fileUri } from '@kit.CoreFileKit';
 import { jsonString, mapOf, moduleParams } from '../native/DshJson';
-import { DshSshKeyStore } from '../native/DshSshKeyStore';
+import { DshImagePicker } from '../native/DshImagePicker';
 import { DshOhosContext, dshError } from '../native/DshOhosContext';
 
 export class KRBridgeModule extends KuiklyRenderBaseModule {
@@ -81,6 +81,12 @@ export class KRBridgeModule extends KuiklyRenderBaseModule {
       }
       case 'pickSshKey':
         this.pickSshKey(callback);
+        break;
+      case 'pickImages':
+        this.pickImages(params, callback);
+        break;
+      case 'captureImage':
+        this.captureImage(params, callback);
         break;
       case 'importSshKey':
         this.importSshKey(params, callback);
@@ -203,6 +209,30 @@ export class KRBridgeModule extends KuiklyRenderBaseModule {
     }).catch((error: Object) => {
       dshError('pickSshKey failed', error);
       DshOhosContext.postToMain(slot, mapOf(['uri'], ['']));
+    });
+  }
+
+  private pickImages(params: KRAny, callback: KuiklyRenderCallback): void {
+    const slot = DshOhosContext.bindOnce((value: Record<string, Object>) => {
+      callback(value);
+    });
+    DshImagePicker.pickImages(params).then((value: Record<string, Object>) => {
+      DshOhosContext.postToMain(slot, value);
+    }).catch((error: Object) => {
+      dshError('pickImages failed', error);
+      DshOhosContext.postToMain(slot, mapOf(['ok', 'message', 'imagesJson'], [false, '无法打开相册', '[]']));
+    });
+  }
+
+  private captureImage(params: KRAny, callback: KuiklyRenderCallback): void {
+    const slot = DshOhosContext.bindOnce((value: Record<string, Object>) => {
+      callback(value);
+    });
+    DshImagePicker.captureImage(params).then((value: Record<string, Object>) => {
+      DshOhosContext.postToMain(slot, value);
+    }).catch((error: Object) => {
+      dshError('captureImage failed', error);
+      DshOhosContext.postToMain(slot, mapOf(['ok', 'code', 'message', 'imagesJson'], [false, 'permission-denied', '未获得相机权限，请在系统设置中允许后重试', '[]']));
     });
   }
 

@@ -144,11 +144,16 @@ internal fun ViewContainer<*, *>.DshConversation(
     onDismissKeyboard: () -> Unit,
     onUserListScroll: (ScrollParams) -> Unit,
     modelLabel: () -> String,
-    attachmentMenuVisible: () -> Boolean,
     voiceActive: () -> Boolean,
+    draftImages: () -> ObservableList<DshDraftImage>,
+    attachmentsSending: () -> Boolean,
     onOpenModels: () -> Unit,
     onToggleAttachments: () -> Unit,
     onToggleVoice: () -> Unit,
+    onPreviewDraftImage: (DshDraftImage) -> Unit,
+    onRemoveDraftImage: (String) -> Unit,
+    onRetryDraftImage: (String) -> Unit,
+    onPreviewAttachment: (DshImageAttachmentRef) -> Unit,
     isWebTimeline: () -> Boolean,
     isDisclosureExpanded: (String) -> Boolean,
     onToggleDisclosure: (String) -> Unit,
@@ -287,6 +292,7 @@ internal fun ViewContainer<*, *>.DshConversation(
                                             onToggleJsonNode = { onToggleJsonNode(message.id, it) },
                                             onCopyToolContent = { onCopyToolContent(it) },
                                             attachmentDataUrl = { attachmentDataUrl(it) },
+                                            onPreviewAttachment = onPreviewAttachment,
                                             contentProvider = {
                                                 val stored = messagesForSession(sessionId)
                                                     .firstOrNull { it.id == message.id }
@@ -408,7 +414,10 @@ internal fun ViewContainer<*, *>.DshConversation(
         }
             View {
                 attr {
-                    height(COMPOSER_HEIGHT)
+                    height(
+                        COMPOSER_HEIGHT +
+                            if (draftImages().isNotEmpty()) DRAFT_THUMB_SIZE + 16f else 0f,
+                    )
                     width(availableWidth)
                     flexDirectionColumn()
                     padding(12f, 14f, 12f, 14f)
@@ -461,6 +470,13 @@ internal fun ViewContainer<*, *>.DshConversation(
                         }
                     }
                 }
+            DshDraftImageStrip(
+                images = draftImages,
+                sending = attachmentsSending,
+                onPreview = onPreviewDraftImage,
+                onRemove = onRemoveDraftImage,
+                onRetry = onRetryDraftImage,
+            )
             Input {
                 ref { inputRef(it) }
                 attr {
@@ -489,41 +505,6 @@ internal fun ViewContainer<*, *>.DshConversation(
                         onKeyboardHeightChange(KeyboardParams(0f, 0.24f))
                     }
                     inputReturn { onSend() }
-                }
-            }
-
-            vif({ attachmentMenuVisible() }) {
-                View {
-                    attr {
-                        height(82f)
-                        marginBottom(8f)
-                        flexDirectionColumn()
-                        padding(8f)
-                        borderRadius(10f)
-                        backgroundColor(tokens.surfaceVariant)
-                    }
-                    View {
-                        attr {
-                            height(32f)
-                            flexDirectionRow()
-                            alignItemsCenter()
-                            paddingLeft(8f)
-                        }
-                        Text { attr { text("图片"); fontSize(14f); color(tokens.primaryText) } }
-                        View { attr { flex(1f) } }
-                        Text { attr { text("PNG / JPG / WebP / GIF"); fontSize(11f); color(tokens.tertiaryText) } }
-                    }
-                    View {
-                        attr {
-                            height(32f)
-                            flexDirectionRow()
-                            alignItemsCenter()
-                            paddingLeft(8f)
-                        }
-                        Text { attr { text("文件"); fontSize(14f); color(tokens.primaryText) } }
-                        View { attr { flex(1f) } }
-                        Text { attr { text("选择本地文件"); fontSize(11f); color(tokens.tertiaryText) } }
-                    }
                 }
             }
 
@@ -565,7 +546,8 @@ internal fun ViewContainer<*, *>.DshConversation(
                 View { attr { flex(1f) } }
                 View {
                     attr { size(40f, 40f); allCenter() }
-                    Image { attr { src(ImageUri.commonAssets("sliders.svg")); size(22f, 22f); tintColor(tokens.icon) } }
+                    Image { attr { src(ImageUri.commonAssets("plus.svg")); size(22f, 22f); tintColor(tokens.icon) } }
+                    DshHitButton(onToggleAttachments)
                 }
                 View {
                     attr {
@@ -591,18 +573,18 @@ internal fun ViewContainer<*, *>.DshConversation(
                         }
                     }
                     velse {
-                        Image {
-                            attr {
-                                src(ImageUri.commonAssets(if (draft().isEmpty()) "mic.svg" else "send.svg"))
-                                size(23f, 23f)
-                                tintColor(tokens.onPrimary)
-                            }
+                    Image {
+                        attr {
+                            src(ImageUri.commonAssets(if (draft().isEmpty() && draftImages().isEmpty()) "mic.svg" else "send.svg"))
+                            size(23f, 23f)
+                            tintColor(tokens.onPrimary)
                         }
+                    }
                     }
                     DshHitButton {
                             when {
                                 stopButtonVisible() -> onStop()
-                                draft().isNotEmpty() -> onSend()
+                                draft().isNotEmpty() || draftImages().isNotEmpty() -> onSend()
                                 else -> onToggleVoice()
                             }
                     }
@@ -625,6 +607,7 @@ internal fun ViewContainer<*, *>.DshMessageRow(
     onToggleJsonNode: (String) -> Unit = {},
     onCopyToolContent: (String) -> Unit = {},
     attachmentDataUrl: (String) -> String? = { null },
+    onPreviewAttachment: (DshImageAttachmentRef) -> Unit = {},
     contentProvider: (() -> String)? = null,
 ) {
     if (message.hidden) return
@@ -679,7 +662,7 @@ internal fun ViewContainer<*, *>.DshMessageRow(
         }
         return
     }
-    if (isWebTimeline && message.attachmentId != null) {
+    if (isWebTimeline && !isUser && message.attachmentId != null) {
         val dataUrl = attachmentDataUrl(message.attachmentId)
         View {
             attr {
@@ -687,6 +670,7 @@ internal fun ViewContainer<*, *>.DshMessageRow(
                 height(220f)
                 marginBottom(12f)
                 borderRadius(8f)
+                overflow(true)
                 backgroundColor(tokens.surfaceVariant)
                 border(Border(1f, BorderStyle.SOLID, tokens.divider))
                 justifyContentCenter()
@@ -709,6 +693,12 @@ internal fun ViewContainer<*, *>.DshMessageRow(
                         color(tokens.secondaryText)
                     }
                 }
+            }
+            DshHitButton {
+                onPreviewAttachment(
+                    message.attachments.firstOrNull()
+                        ?: DshImageAttachmentRef(attachmentId = message.attachmentId.orEmpty()),
+                )
             }
         }
         return
@@ -854,14 +844,25 @@ internal fun ViewContainer<*, *>.DshMessageRow(
                     },
                 )
             }
+            val imageGridWidth = (getPager().pageData.pageViewWidth - 64f).coerceAtMost(592f).coerceAtLeast(120f)
             if (isUser || isError) {
-                Text {
-                    attr {
-                        text(message.content)
-                        lines(Int.MAX_VALUE)
-                        fontSize(15f)
-                        color(if (isUser) tokens.userBubbleText else tokens.error.foreground)
+                if (message.content.isNotEmpty()) {
+                    Text {
+                        attr {
+                            text(message.content)
+                            lines(Int.MAX_VALUE)
+                            fontSize(15f)
+                            color(if (isUser) tokens.userBubbleText else tokens.error.foreground)
+                        }
                     }
+                }
+                if (isUser && message.attachments.isNotEmpty()) {
+                    DshMessageImageGrid(
+                        attachments = message.attachments,
+                        attachmentDataUrl = attachmentDataUrl,
+                        onPreview = onPreviewAttachment,
+                        maxWidth = imageGridWidth,
+                    )
                 }
             } else {
                 View {

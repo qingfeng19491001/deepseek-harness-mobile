@@ -14,7 +14,7 @@
     },
     {
       "name": "dsh_camera_reason",
-      "value": "Scan the computer QR code to pair Relay"
+      "value": "Scan the computer QR code to pair Relay, or take a photo as a chat attachment"
     },
     {
       "name": "dsh_network_reason",
