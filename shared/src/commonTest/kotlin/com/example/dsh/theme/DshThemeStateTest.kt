@@ -40,9 +40,28 @@ class DshThemeStateTest {
     }
 
     @Test
+    fun autoUsesSolarNight() {
+        assertTrue(DshThemeState(DshThemePreference.AUTO, systemDark = false, solarNight = true).isDark)
+        assertFalse(DshThemeState(DshThemePreference.AUTO, systemDark = true, solarNight = false).isDark)
+    }
+
+    @Test
+    fun codeThemeCanDivergeFromApp() {
+        val darkAppLightCode = DshThemeState(
+            preference = DshThemePreference.DARK,
+            codeTheme = DshCodeThemePreference.LIGHT,
+        )
+        assertTrue(darkAppLightCode.isDark)
+        assertFalse(darkAppLightCode.codeIsDark)
+    }
+
+    @Test
     fun invalidStorageFallsBackToSystem() {
         listOf(null, "", "blue", "TRUE", "1", "night").forEach {
             assertEquals(DshThemePreference.SYSTEM, DshThemePreference.fromStorage(it), "raw=$it")
         }
+        assertEquals(DshThemePreference.AUTO, DshThemePreference.fromStorage("auto"))
+        assertEquals(DshCodeThemePreference.FOLLOW, DshCodeThemePreference.fromStorage(null))
+        assertEquals(DshCodeThemePreference.DARK, DshCodeThemePreference.fromStorage("dark"))
     }
 }

@@ -96,6 +96,41 @@ internal data class DshThemeTokens(
             disabled = DshStateColors(Color(0xFF2C2C2EL), Color(0xFF9CA2A8L)),
         )
 
-        fun of(isDark: Boolean): DshThemeTokens = if (isDark) DARK else LIGHT
+        val LIGHT_HIGH_CONTRAST = LIGHT.copy(
+            background = Color(0xFFFFFFFDL),
+            surface = Color(0xFFFFFFFDL),
+            surfaceVariant = Color(0xFFE8E8E8L),
+            surfaceElevated = Color(0xFFFFFFFDL),
+            primaryText = Color(0xFF000000L),
+            secondaryText = Color(0xFF1A1A1AL),
+            tertiaryText = Color(0xFF2E2E2EL),
+            captionText = Color(0xFF2E2E2EL),
+            divider = Color(0x000000L, 0.28f),
+            dividerStrong = Color(0x000000L, 0.40f),
+            icon = Color(0xFF111111L),
+            userBubbleText = Color(0xFF0A1628L),
+        )
+
+        val DARK_HIGH_CONTRAST = DARK.copy(
+            background = Color(0xFF000000L),
+            surface = Color(0xFF0A0A0AL),
+            surfaceVariant = Color(0xFF161616L),
+            surfaceElevated = Color(0xFF1C1C1CL),
+            primaryText = Color(0xFFFFFFFDL),
+            secondaryText = Color(0xFFF2F2F2L),
+            tertiaryText = Color(0xFFE0E0E0L),
+            captionText = Color(0xFFD6D6D6L),
+            divider = Color(0xFFFFFFL, 0.32f),
+            dividerStrong = Color(0xFFFFFFL, 0.48f),
+            icon = Color(0xFFFFFFFDL),
+            userBubbleText = Color(0xFFFFFFFDL),
+        )
+
+        fun of(isDark: Boolean, highContrast: Boolean = false): DshThemeTokens = when {
+            highContrast && isDark -> DARK_HIGH_CONTRAST
+            highContrast -> LIGHT_HIGH_CONTRAST
+            isDark -> DARK
+            else -> LIGHT
+        }
     }
 }

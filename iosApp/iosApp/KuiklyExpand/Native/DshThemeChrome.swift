@@ -17,8 +17,15 @@ final class DshThemeChrome: NSObject {
     }
 
     @objc static func resolveIsDark() -> Bool {
+        resolveIsDark(systemDark: systemIsDark())
+    }
+
+    @objc(resolveIsDarkWithSystemDark:)
+    static func resolveIsDark(systemDark: Bool) -> Bool {
         let raw = UserDefaults.standard.string(forKey: prefKey)
-        return DshThemePreference.companion.fromStorage(raw: raw).resolvedIsDark(systemDark: systemIsDark())
+        let preference = DshThemePreference.companion.fromStorage(raw: raw)
+        // AUTO 首帧先跟传入的系统深浅，避免 UITraitCollection.current 在入窗前读成 Mac 外观。
+        return preference.resolvedIsDark(systemDark: systemDark, solarNight: systemDark)
     }
 
     @objc static func backgroundColor(_ isDark: Bool) -> UIColor {

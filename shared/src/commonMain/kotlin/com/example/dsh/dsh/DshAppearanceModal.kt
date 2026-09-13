@@ -1,6 +1,8 @@
 package com.example.dsh.dsh
 
+import com.example.dsh.theme.DshCodeThemePreference
 import com.example.dsh.theme.DshThemePreference
+import com.example.dsh.theme.DshThemeSnapshot
 import com.example.dsh.theme.theme
 import com.example.dsh.theme.tokens
 import com.tencent.kuikly.core.base.Border
@@ -16,6 +18,8 @@ import com.tencent.kuikly.core.views.View
 
 internal fun ViewContainer<*, *>.DshAppearanceModal(
     onSelect: (DshThemePreference) -> Unit,
+    onSelectCodeTheme: (DshCodeThemePreference) -> Unit,
+    onToggleHighContrast: (Boolean) -> Unit,
     onClose: () -> Unit,
 ) {
     Modal(inWindow = true) {
@@ -41,6 +45,8 @@ internal fun ViewContainer<*, *>.DshAppearanceModal(
                 padding(24f)
                 borderRadius(18f)
                 backgroundColor(tokens.surface)
+                // 订阅 revision，避免只改偏好、深浅不变时单选圈不刷新。
+                opacity(if (theme.revision >= 0) 1f else 1f)
             }
             View {
                 attr { height(32f); flexDirectionRow(); alignItemsCenter() }
@@ -65,37 +71,87 @@ internal fun ViewContainer<*, *>.DshAppearanceModal(
                     event { click { onClose() } }
                 }
             }
-            Text {
-                attr {
-                    text("主题模式")
-                    marginTop(14f)
-                    fontSize(13f)
-                    color(tokens.secondaryText)
-                }
-            }
-            View {
-                attr {
-                    marginTop(8f)
-                    flexDirectionColumn()
-                    borderRadius(12f)
-                    border(Border(1f, BorderStyle.SOLID, tokens.divider))
-                    backgroundColor(tokens.surfaceVariant)
-                    padding(4f)
-                }
+            DshAppearanceSectionLabel("主题模式")
+            DshAppearanceGroup {
                 DshThemePreference.entries.forEachIndexed { index, preference ->
-                    DshAppearanceOption(
-                        preference = preference,
+                    DshAppearanceChoice(
+                        title = preference.label,
+                        selected = { theme.preference == preference },
+                        subtitle = { appearanceSubtitle(preference, theme) },
                         marginTop = if (index == 0) 0f else 2f,
                         onSelect = { onSelect(preference) },
                     )
                 }
             }
+            DshAppearanceSectionLabel("代码主题")
+            DshAppearanceGroup {
+                DshCodeThemePreference.entries.forEachIndexed { index, preference ->
+                    DshAppearanceChoice(
+                        title = preference.label,
+                        selected = { theme.codeTheme == preference },
+                        subtitle = {
+                            if (preference == DshCodeThemePreference.FOLLOW) {
+                                if (theme.codeIsDark) "当前：深色高亮" else "当前：浅色高亮"
+                            } else {
+                                ""
+                            }
+                        },
+                        marginTop = if (index == 0) 0f else 2f,
+                        onSelect = { onSelectCodeTheme(preference) },
+                    )
+                }
+            }
+            DshAppearanceSectionLabel("无障碍")
+            DshAppearanceGroup {
+                DshAppearanceChoice(
+                    title = "高对比度",
+                    selected = { theme.highContrast },
+                    subtitle = { "提高正文、分割线和状态色的对比" },
+                    marginTop = 0f,
+                    onSelect = { onToggleHighContrast(!theme.highContrast) },
+                )
+            }
         }
     }
 }
 
-private fun ViewContainer<*, *>.DshAppearanceOption(
-    preference: DshThemePreference,
+private fun appearanceSubtitle(preference: DshThemePreference, snapshot: DshThemeSnapshot): String = when {
+    preference == DshThemePreference.SYSTEM && snapshot.preference == DshThemePreference.SYSTEM ->
+        if (snapshot.isDark) "当前：深色" else "当前：浅色"
+    preference == DshThemePreference.AUTO && snapshot.preference == DshThemePreference.AUTO ->
+        if (snapshot.isDark) "当前：日落后深色" else "当前：日出后浅色"
+    else -> ""
+}
+
+private fun ViewContainer<*, *>.DshAppearanceSectionLabel(title: String) {
+    Text {
+        attr {
+            text(title)
+            marginTop(14f)
+            fontSize(13f)
+            color(tokens.secondaryText)
+        }
+    }
+}
+
+private fun ViewContainer<*, *>.DshAppearanceGroup(init: ViewContainer<*, *>.() -> Unit) {
+    View {
+        attr {
+            marginTop(8f)
+            flexDirectionColumn()
+            borderRadius(12f)
+            border(Border(1f, BorderStyle.SOLID, tokens.divider))
+            backgroundColor(tokens.surfaceVariant)
+            padding(4f)
+        }
+        init()
+    }
+}
+
+private fun ViewContainer<*, *>.DshAppearanceChoice(
+    title: String,
+    selected: () -> Boolean,
+    subtitle: () -> String,
     marginTop: Float,
     onSelect: () -> Unit,
 ) {
@@ -110,7 +166,7 @@ private fun ViewContainer<*, *>.DshAppearanceOption(
             paddingTop(10f)
             paddingBottom(10f)
             borderRadius(9f)
-            backgroundColor(if (theme.preference == preference) tokens.surface else Color.TRANSPARENT)
+            backgroundColor(if (selected()) tokens.surface else Color.TRANSPARENT)
         }
         View {
             attr {
@@ -119,9 +175,9 @@ private fun ViewContainer<*, *>.DshAppearanceOption(
                 allCenter()
                 border(
                     Border(
-                        if (theme.preference == preference) 5f else 1.5f,
+                        if (selected()) 5f else 1.5f,
                         BorderStyle.SOLID,
-                        if (theme.preference == preference) tokens.primary else tokens.dividerStrong,
+                        if (selected()) tokens.primary else tokens.dividerStrong,
                     ),
                 )
                 backgroundColor(tokens.surface)
@@ -131,16 +187,16 @@ private fun ViewContainer<*, *>.DshAppearanceOption(
             attr { flex(1f); marginLeft(12f); flexDirectionColumn() }
             Text {
                 attr {
-                    text(preference.label)
+                    text(title)
                     fontSize(15f)
                     fontWeightMedium()
                     color(tokens.primaryText)
                 }
             }
-            vif({ preference == DshThemePreference.SYSTEM && theme.preference == DshThemePreference.SYSTEM }) {
+            vif({ subtitle().isNotEmpty() }) {
                 Text {
                     attr {
-                        text(if (theme.isDark) "当前：深色" else "当前：浅色")
+                        text(subtitle())
                         marginTop(2f)
                         fontSize(12f)
                         color(tokens.tertiaryText)

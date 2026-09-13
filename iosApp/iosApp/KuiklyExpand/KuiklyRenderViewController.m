@@ -25,7 +25,7 @@
         _delegator = [[KuiklyRenderViewControllerBaseDelegator alloc] initWithPageName:pageName pageData:pageData];
         _delegator.delegate = self;
         _lastSystemDark = [DshThemeChrome systemIsDark];
-        _chromeIsDark = [DshThemeChrome resolveIsDark];
+        _chromeIsDark = [DshThemeChrome resolveIsDarkWithSystemDark:_lastSystemDark];
     }
     return self;
 }
@@ -33,6 +33,7 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.fd_prefersNavigationBarHidden = YES;
+    [self syncSystemAppearanceFromTraitCollection:self.traitCollection notifyPager:NO];
     [self applyThemeChrome:_chromeIsDark];
     [_delegator viewDidLoadWithView:self.view];
     [self.navigationController setNavigationBarHidden:YES animated:NO];
@@ -72,17 +73,20 @@
 
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
     [super traitCollectionDidChange:previousTraitCollection];
-    if (!previousTraitCollection) {
-        return;
-    }
-    BOOL systemDark = [DshThemeChrome systemIsDarkIn:self.traitCollection];
-    if (systemDark == self.lastSystemDark) {
+    [self syncSystemAppearanceFromTraitCollection:self.traitCollection notifyPager:YES];
+}
+
+- (void)syncSystemAppearanceFromTraitCollection:(UITraitCollection *)traits notifyPager:(BOOL)notifyPager {
+    BOOL systemDark = [DshThemeChrome systemIsDarkIn:traits];
+    if (systemDark == self.lastSystemDark && self.chromeApplied) {
         return;
     }
     self.lastSystemDark = systemDark;
-    [_delegator sendWithEvent:DshThemeChrome.themeDidChangedEvent
-                         data:@{ DshThemeChrome.isNightModeKey: @(systemDark) }];
-    [self applyThemeChrome:[DshThemeChrome resolveIsDark]];
+    if (notifyPager) {
+        [_delegator sendWithEvent:DshThemeChrome.themeDidChangedEvent
+                             data:@{ DshThemeChrome.isNightModeKey: @(systemDark) }];
+    }
+    [self applyThemeChrome:[DshThemeChrome resolveIsDarkWithSystemDark:systemDark]];
 }
 
 - (void)applyThemeChrome:(BOOL)isDark {

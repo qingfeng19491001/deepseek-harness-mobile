@@ -625,6 +625,8 @@ internal class DshHomePage : BasePager() {
                 vif({ ctx.appearanceVisible }) {
                     DshAppearanceModal(
                         onSelect = { ctx.setThemePreference(it) },
+                        onSelectCodeTheme = { ctx.setCodeThemePreference(it) },
+                        onToggleHighContrast = { ctx.setHighContrast(it) },
                         onClose = { ctx.appearanceVisible = false },
                     )
                 }

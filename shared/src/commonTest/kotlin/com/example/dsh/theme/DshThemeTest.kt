@@ -79,4 +79,32 @@ class DshThemeTest {
         assertEquals(DshThemeTokens.LIGHT, DshTheme.snapshot.tokens)
         assertEquals(DshCodeColors.LIGHT, DshTheme.snapshot.codeColors)
     }
+
+    @Test
+    fun highContrastAndCodeThemeChangeSnapshot() {
+        DshTheme.setPreference(DshThemePreference.LIGHT)
+        assertTrue(DshTheme.setHighContrast(true))
+        assertEquals(DshThemeTokens.LIGHT_HIGH_CONTRAST, DshTheme.snapshot.tokens)
+        assertTrue(DshTheme.setCodeTheme(DshCodeThemePreference.DARK))
+        assertEquals(DshCodeColors.DARK, DshTheme.snapshot.codeColors)
+        assertFalse(DshTheme.snapshot.isDark)
+        assertTrue(DshTheme.snapshot.codeIsDark)
+    }
+
+    @Test
+    fun preferenceChangeWithSameIsDarkStillUpdatesSnapshot() {
+        DshTheme.bootstrap("light", systemDark = false)
+        assertTrue(DshTheme.setPreference(DshThemePreference.SYSTEM))
+        assertEquals(DshThemePreference.SYSTEM, DshTheme.snapshot.preference)
+        assertFalse(DshTheme.snapshot.isDark)
+    }
+
+    @Test
+    fun autoFollowsSolarNight() {
+        DshTheme.bootstrap("auto", systemDark = false, solarNight = false)
+        assertFalse(DshTheme.snapshot.isDark)
+        assertTrue(DshTheme.updateSolarNight(true))
+        assertTrue(DshTheme.snapshot.isDark)
+        assertEquals(DshThemePreference.AUTO, DshTheme.snapshot.preference)
+    }
 }

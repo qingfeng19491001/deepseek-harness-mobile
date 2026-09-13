@@ -1,5 +1,42 @@
 #import "DshSshTunnel.h"
 
+#if TARGET_OS_SIMULATOR
+
+@implementation DshSshTunnel
+
+- (void)connectWithHost:(NSString *)host
+                   port:(NSInteger)port
+               username:(NSString *)username
+          remoteDshPort:(NSInteger)remoteDshPort
+               keyBytes:(NSData *)keyBytes
+             passphrase:(NSString *)passphrase
+            fingerprint:(NSString *)fingerprint {
+    void (^callback)(NSDictionary *) = self.onState;
+    if (!callback) return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        callback(@{
+            @"phase": @"ERROR",
+            @"message": @"iOS 模拟器不支持 SSH（NMSSH 仅含真机 OpenSSL）",
+            @"localPort": @0,
+            @"generation": @0,
+        });
+    });
+}
+
+- (void)acceptFingerprint:(NSString *)fingerprint {
+}
+
+- (void)disconnect {
+}
+
+- (NSString *)endpoint {
+    return nil;
+}
+
+@end
+
+#else
+
 #import <CommonCrypto/CommonDigest.h>
 #import <arpa/inet.h>
 #import <fcntl.h>
@@ -426,3 +463,5 @@ static const int kKeepAliveSeconds = 15;
 }
 
 @end
+
+#endif

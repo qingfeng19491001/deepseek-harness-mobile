@@ -41,7 +41,12 @@ class DshThemeTokensTest {
 
     @Test
     fun bodyTextMeetsWcagAA() {
-        listOf("light" to light, "dark" to dark).forEach { (scheme, t) ->
+        listOf(
+            "light" to light,
+            "dark" to dark,
+            "light-hc" to DshThemeTokens.LIGHT_HIGH_CONTRAST,
+            "dark-hc" to DshThemeTokens.DARK_HIGH_CONTRAST,
+        ).forEach { (scheme, t) ->
             assertAtLeast(4.5, t.primaryText, t.background, "$scheme primaryText/background")
             assertAtLeast(4.5, t.primaryText, t.surface, "$scheme primaryText/surface")
             assertAtLeast(4.5, t.primaryText, t.surfaceVariant, "$scheme primaryText/surfaceVariant")
