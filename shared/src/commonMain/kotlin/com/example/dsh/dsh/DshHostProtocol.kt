@@ -92,12 +92,19 @@ internal object DshWebTimelineParser {
             val data = event.optJSONObject("data") ?: continue
             when (type) {
                 "user/message" -> {
-                    val text = textFromBlocks(data.optJSONArray("content"))
-                    if (text.isEmpty()) continue
+                    val content = data.optJSONArray("content")
+                    val text = textFromBlocks(content)
+                    val images = dshImageRefsFromBlocks(content)
+                    if (text.isEmpty() && images.isEmpty()) continue
                     val source = data.optJSONObject("source")
                     val sourceKind = source?.optString("kind").orEmpty()
                     if (sourceKind == "user") {
-                        result += DshWebTimelineItem("user-$seq", DshWebTimelineItem.Kind.USER, text)
+                        result += DshWebTimelineItem(
+                            "user-$seq",
+                            DshWebTimelineItem.Kind.USER,
+                            text,
+                            attachments = images,
+                        )
                     } else {
                         result += DshWebTimelineItem(
                             key = "context-$seq",
@@ -374,15 +381,14 @@ internal fun appendAssistantBlocks(
                     it,
                 )
             }
-            "image" -> block.optJSONObject("attachment")?.optString("attachmentId")
-                ?.takeIf { it.isNotEmpty() }
-                ?.let {
-                    result += DshWebTimelineItem(
-                        "image-$seq-$blockIndex",
-                        DshWebTimelineItem.Kind.IMAGE,
-                        attachmentId = it,
-                    )
-                }
+            "image" -> dshParseImageRef(block.optJSONObject("attachment"))?.let { ref ->
+                result += DshWebTimelineItem(
+                    "image-$seq-$blockIndex",
+                    DshWebTimelineItem.Kind.IMAGE,
+                    attachmentId = ref.attachmentId,
+                    attachments = listOf(ref),
+                )
+            }
             "tool-call" -> Unit
             else -> result += DshWebTimelineItem(
                 "block-$seq-$blockIndex",
@@ -405,6 +411,7 @@ private data class QueuedRpc(
     val method: String,
     val payload: JSONObject,
     val rpcId: String,
+    val timeoutSeconds: Int = 30,
     val callback: (JSONObject?, DshRpcError?, String) -> Unit,
 )
 
@@ -490,11 +497,12 @@ internal class DshHostConnectionRuntime(
     fun call(
         method: String,
         payload: JSONObject,
+        timeoutSeconds: Int = REQUEST_TIMEOUT_SECONDS,
         callback: (JSONObject?, DshRpcError?, String) -> Unit,
     ): DshRpcCall {
         val myGeneration = generation
         val rpcId = nextRpcId(myGeneration)
-        val request = QueuedRpc(myGeneration, method, payload, rpcId, callback)
+        val request = QueuedRpc(myGeneration, method, payload, rpcId, timeoutSeconds, callback)
         if (stopped) callback(null, DshRpcError("cancelled", "连接已停止"), rpcId)
         else if (productReady) dispatch(request)
         else queued += request
@@ -688,6 +696,7 @@ internal class DshHostConnectionRuntime(
             request.rpcId,
             typert = false,
             request.callback,
+            request.timeoutSeconds,
         )
     }
 
@@ -699,6 +708,7 @@ internal class DshHostConnectionRuntime(
         rpcId: String,
         typert: Boolean,
         callback: (JSONObject?, DshRpcError?, String) -> Unit,
+        timeoutSeconds: Int = REQUEST_TIMEOUT_SECONDS,
     ) {
         val body = if (typert) {
             JSONObject().apply { put("args", payload) }
@@ -716,7 +726,7 @@ internal class DshHostConnectionRuntime(
         }
         network.httpRequest(
             "${connection.baseUrl.trimEnd('/')}$path",
-            true, body, headers, null, REQUEST_TIMEOUT_SECONDS,
+            true, body, headers, null, timeoutSeconds,
         ) { data, success, errorMsg, response ->
             if (myGeneration != generation || stopped) {
                 callback(null, DshRpcError("generation-cancelled", "请求所属连接世代已失效"), rpcId)
@@ -997,6 +1007,9 @@ internal class DshRemoteHostRepository(
                 if (id.isEmpty()) continue
                 val projections = item.optJSONObject("projections")?.optJSONObject("values")
                 val updatedAt = dshParseUpdatedAt(item.optLong("updatedAt"), item.optString("updatedAt"))
+                projections?.optJSONObject("imageLimits")?.let { limits ->
+                    parseDshImageLimits(limits)?.let { store.applyImageLimits(it) }
+                }
                 add(DshSession(
                     id = id,
                     title = projections?.optString("title")?.takeIf { it.isNotEmpty() } ?: "尚无标题",
@@ -1511,36 +1524,15 @@ internal class DshRemoteHostRepository(
         )
     }
 
-    fun streamReply(pagerId: String, sessionId: String, prompt: String, onDelta: (String) -> Unit, onComplete: (String) -> Unit, onError: (String) -> Unit): DshStreamHandle {
-        val call = runtime.call(DshHostProtocol.SESSION_PROMPT, JSONObject().apply {
-            put("sessionId", sessionId); put("mode", "queue")
-            put("content", JSONArray().apply { put(JSONObject().apply { put("type", "text"); put("text", prompt) }) })
-            put("clientTimeZone", "UTC")
-        }) { value, error, rpcId ->
-            if (error != null) {
-                if (dshIsTransportInterrupt(error.code, error.message)) {
-                    DshStreamLog.i("prompt.hold-for-resync session=$sessionId rpcId=$rpcId code=${error.code}")
-                    return@call
-                }
-                activeStreams.remove(rpcId); onError(error.message); return@call
-            }
-            val command = value?.optJSONObject("command")
-            if (command != null) {
-                activeStreams.remove(rpcId); onComplete(command.optString("text"))
-            }
-        }
-        activeStreams[call.rpcId] = ActiveStream(sessionId, call.rpcId, { text, _ -> onDelta(text) }, onComplete, onError)
-        return object : DshStreamHandle {
-            private var cancelled = false
-            override fun cancel() {
-                if (cancelled) return
-                cancelled = true
-                activeStreams.remove(call.rpcId)
-                call.cancel()
-                runtime.call(DshHostProtocol.SESSION_CANCEL, JSONObject().apply { put("sessionId", sessionId) }) { _, _, _ -> }
-            }
-        }
-    }
+    fun streamReply(
+        pagerId: String,
+        sessionId: String,
+        prompt: String,
+        onDelta: (String) -> Unit,
+        onComplete: (String) -> Unit,
+        onError: (String) -> Unit,
+        images: List<DshPromptImagePart> = emptyList(),
+    ): DshStreamHandle = streamReply(pagerId, sessionId, prompt, { text, _ -> onDelta(text) }, onComplete, onError, images)
 
     override fun streamReply(
         pagerId: String,
@@ -1549,26 +1541,36 @@ internal class DshRemoteHostRepository(
         onDelta: (String, Boolean) -> Unit,
         onComplete: (String) -> Unit,
         onError: (String) -> Unit,
+        images: List<DshPromptImagePart>,
     ): DshStreamHandle {
-        val call = runtime.call(DshHostProtocol.SESSION_PROMPT, JSONObject().apply {
-            put("sessionId", sessionId); put("mode", "queue")
-            put("content", JSONArray().apply { put(JSONObject().apply { put("type", "text"); put("text", prompt) }) })
-            put("clientTimeZone", "UTC")
-        }) { value, error, rpcId ->
-            if (error != null) {
-                if (dshIsTransportInterrupt(error.code, error.message)) {
-                    DshStreamLog.i("prompt.hold-for-resync session=$sessionId rpcId=$rpcId code=${error.code}")
-                    return@call
+        val timeoutSeconds = if (images.isEmpty()) 30 else DSH_IMAGE_PROMPT_TIMEOUT_SECONDS
+        val call = runtime.call(
+            DshHostProtocol.SESSION_PROMPT,
+            JSONObject().apply {
+                put("sessionId", sessionId)
+                put("mode", "queue")
+                put("content", dshPromptContent(prompt, images))
+                put("clientTimeZone", "UTC")
+            },
+            timeoutSeconds,
+        ) { value, error, rpcId ->
+                if (error != null) {
+                    if (dshIsTransportInterrupt(error.code, error.message)) {
+                        DshStreamLog.i("prompt.hold-for-resync session=$sessionId rpcId=$rpcId code=${error.code}")
+                        return@call
+                    }
+                    val label = dshAttachmentErrorLabel(error.code, error.message).ifEmpty { error.message }
+                    activeStreams.remove(rpcId); onError(label); return@call
                 }
-                activeStreams.remove(rpcId); onError(error.message); return@call
-            }
-            val command = value?.optJSONObject("command")
-            if (command != null) {
-                activeStreams.remove(rpcId); onComplete(command.optString("text"))
-            }
+                val command = value?.optJSONObject("command")
+                if (command != null) {
+                    activeStreams.remove(rpcId); onComplete(command.optString("text"))
+                }
         }
         activeStreams[call.rpcId] = ActiveStream(sessionId, call.rpcId, onDelta, onComplete, onError)
-        DshStreamLog.i("prompt.start session=$sessionId rpcId=${call.rpcId} promptChars=${prompt.length} prompt='${DshStreamLog.preview(prompt)}'")
+        DshStreamLog.i(
+            "prompt.start session=$sessionId rpcId=${call.rpcId} promptChars=${prompt.length} images=${images.size} prompt='${DshStreamLog.preview(prompt)}'",
+        )
         return object : DshStreamHandle {
             private var cancelled = false
             override fun cancel() {
@@ -1953,8 +1955,19 @@ internal class DshRemoteHostRepository(
             val type = event.optString("type")
             val data = event.optJSONObject("data") ?: continue
             when (type) {
-                "user/message" -> textFromBlocks(data.optJSONArray("content")).takeIf { it.isNotEmpty() }?.let {
-                    messages += DshMessage("user-$seq", DshMessageRole.USER, it)
+                "user/message" -> {
+                    val content = data.optJSONArray("content")
+                    val text = textFromBlocks(content)
+                    val images = dshImageRefsFromBlocks(content)
+                    if (text.isNotEmpty() || images.isNotEmpty()) {
+                        messages += DshMessage(
+                            "user-$seq",
+                            DshMessageRole.USER,
+                            text,
+                            attachments = images,
+                            attachmentId = images.firstOrNull()?.attachmentId,
+                        )
+                    }
                 }
                 "assistant/chunk" -> {
                     val key = "${data.optInt("turn")}:${data.optInt("step")}"

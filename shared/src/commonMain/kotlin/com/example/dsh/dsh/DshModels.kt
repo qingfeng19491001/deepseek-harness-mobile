@@ -106,6 +106,7 @@ internal data class DshImageLimits(
     val maxMessageImageBytes: Long,
     val maxImagePixels: Long,
     val mediaTypes: List<String>,
+    val maxImageDimension: Int = 8192,
 )
 
 internal data class DshRawSessionEvent(
@@ -132,6 +133,8 @@ internal class DshHostStore {
     val jobSnapshots = linkedMapOf<String, String>()
     val projections = linkedMapOf<String, MutableMap<String, DshProjectionCell>>()
     val pendingInteractions = linkedMapOf<String, String>()
+    var imageLimits: DshImageLimits? = null
+        private set
 
     fun replaceWorkspaceBaseline(raw: String, archived: Set<String>) {
         workspaceBaseline = raw
@@ -213,6 +216,10 @@ internal class DshHostStore {
     fun replaceQueue(sessionId: String, rawItems: String) { queueSnapshots[sessionId] = rawItems }
     fun replaceJobs(sessionId: String, rawJobs: String) { jobSnapshots[sessionId] = rawJobs }
 
+    fun applyImageLimits(limits: DshImageLimits) {
+        imageLimits = limits
+    }
+
     /** Projection updates use higher-seq-wins, including across reconnect baselines. */
     fun applyProjection(sessionId: String, key: String, value: String, seq: Int) {
         val cells = projections.getOrPut(sessionId) { mutableMapOf() }
@@ -222,6 +229,9 @@ internal class DshHostStore {
             if (key == "title") {
                 val title = value.trim().removeSurrounding("\"")
                 sessions[sessionId]?.let { sessions[sessionId] = it.copy(title = title) }
+            }
+            if (key == "imageLimits") {
+                parseDshImageLimits(value)?.let { imageLimits = it }
             }
         }
     }
@@ -313,6 +323,7 @@ internal data class DshMessage(
     val contextRelaySender: String = "",
     val isReasoning: Boolean = false,
     val attachmentId: String? = null,
+    val attachments: List<DshImageAttachmentRef> = emptyList(),
     val toolCallId: String = "",
     /** Remote-only structured tool state; LOCAL keeps this null. */
     val remoteTool: DshRemoteToolCallModel? = null,
@@ -381,6 +392,7 @@ internal fun DshMessage.visuallyEquals(other: DshMessage): Boolean =
         contextBody == other.contextBody &&
         isReasoning == other.isReasoning &&
         attachmentId == other.attachmentId &&
+        attachments == other.attachments &&
         toolCallId == other.toolCallId &&
         remoteTool == other.remoteTool
 
@@ -427,6 +439,7 @@ internal data class DshWebTimelineItem(
     val cardTitle: String = "",
     val cardBody: String = "",
     val attachmentId: String? = null,
+    val attachments: List<DshImageAttachmentRef> = emptyList(),
     val source: com.tencent.kuikly.core.nvi.serialization.json.JSONObject? = null,
     val remoteTool: DshRemoteToolCallModel? = null,
 ) {
@@ -629,5 +642,6 @@ internal interface DshRepository {
         onDelta: (String, Boolean) -> Unit,
         onComplete: (String) -> Unit,
         onError: (String) -> Unit,
+        images: List<DshPromptImagePart> = emptyList(),
     ): DshStreamHandle
 }

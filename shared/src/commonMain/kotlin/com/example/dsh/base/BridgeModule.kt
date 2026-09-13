@@ -303,6 +303,14 @@ internal class BridgeModule : Module() {
         }
     }
 
+    fun pickImages(params: JSONObject, callback: (JSONObject?) -> Unit) {
+        callNativeMethod("pickImages", params, callback)
+    }
+
+    fun captureImage(params: JSONObject, callback: (JSONObject?) -> Unit) {
+        callNativeMethod("captureImage", params, callback)
+    }
+
     fun importSshKey(uri: String, callback: (String) -> Unit) {
         callNativeMethod("importSshKey", JSONObject().apply { put("uri", uri) }) { value ->
             callback(value?.optString("keyId").orEmpty())

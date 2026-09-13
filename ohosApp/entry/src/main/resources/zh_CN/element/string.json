@@ -14,7 +14,7 @@
     },
     {
       "name": "dsh_camera_reason",
-      "value": "扫描电脑二维码以配对 Relay"
+      "value": "扫描电脑二维码以配对 Relay，或拍摄图片作为对话附件"
     },
     {
       "name": "dsh_network_reason",

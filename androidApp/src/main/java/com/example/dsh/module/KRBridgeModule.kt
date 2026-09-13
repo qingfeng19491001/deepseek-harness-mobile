@@ -15,8 +15,8 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.Toast
 import com.tencent.kuikly.core.render.android.export.KuiklyRenderBaseModule
 import com.tencent.kuikly.core.render.android.export.KuiklyRenderCallback
+import com.example.dsh.DshImagePicker
 import com.example.dsh.KRApplication
-import com.example.dsh.KuiklyRenderActivity
 import com.example.dsh.ssh.DshSshForegroundService
 import com.example.dsh.ssh.DshSshKeyStore
 import org.json.JSONArray
@@ -28,6 +28,7 @@ class KRBridgeModule : KuiklyRenderBaseModule() {
     private var navigationBarColorBeforeDim: Int? = null
     private var navigationBarContrastBeforeDim: Boolean? = null
     private var sshKeyCallback: KuiklyRenderCallback? = null
+    private val imagePicker = DshImagePicker(this)
 
     init {
         activeInstance = this
@@ -96,6 +97,8 @@ class KRBridgeModule : KuiklyRenderBaseModule() {
             }
 
             "pickSshKey" -> pickSshKey(callback)
+            "pickImages" -> imagePicker.pickImages(params, callback?.let { cb -> { value -> cb.invoke(value) } })
+            "captureImage" -> imagePicker.captureImage(params, callback?.let { cb -> { value -> cb.invoke(value) } })
             "importSshKey" -> importSshKey(params, callback)
             "validateSshKey" -> validateSshKey(params, callback)
             "deleteSshKey" -> deleteSshKey(params)
@@ -228,6 +231,8 @@ class KRBridgeModule : KuiklyRenderBaseModule() {
         }
     }
 
+    fun hostActivity(): android.app.Activity? = activity
+
     private fun pickSshKey(callback: KuiklyRenderCallback?) {
         sshKeyCallback = callback
         val act = activity ?: run {
@@ -285,6 +290,7 @@ class KRBridgeModule : KuiklyRenderBaseModule() {
     }
 
     private fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        if (imagePicker.onRequestPermissionsResult(requestCode, grantResults)) return
         if (requestCode != REQUEST_SSH_KEY_PERMISSION) return
         val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
         if (!granted) {
@@ -352,6 +358,7 @@ class KRBridgeModule : KuiklyRenderBaseModule() {
     }
 
     fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (imagePicker.onActivityResult(requestCode, resultCode, data)) return
         if (requestCode != REQUEST_SSH_KEY) return
         val uri = if (resultCode == android.app.Activity.RESULT_OK) data?.data?.toString().orEmpty() else ""
         sshKeyCallback?.invoke(mapOf("uri" to uri))
