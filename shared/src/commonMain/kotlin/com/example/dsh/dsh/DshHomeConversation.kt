@@ -1,5 +1,6 @@
 package com.example.dsh.dsh
 
+import com.example.dsh.theme.theme
 import com.example.dsh.theme.tokens
 import com.tencent.kuikly.core.base.*
 import com.tencent.kuikly.core.base.attr.ImageUri
@@ -982,6 +983,7 @@ internal fun ViewContainer<*, *>.DshMessageRow(
                                         liveContent = contentProvider
                                         streamingProvider = pageStreaming
                                         streaming = live
+                                        darkMode = theme.isDark
                                         onCopyCode = { onCopyToolContent(it) }
                                     }
                                 }

@@ -242,13 +242,14 @@ internal class DshMarkdownView : ComposeView<DshMarkdownAttr, ComposeEvent>() {
         if (cached != null && cachedConfigRevision == snapshot.revision && cachedConfigStreaming == streaming) {
             return cached
         }
-        val dark = snapshot.isDark
+        val dark = snapshot.codeIsDark
         val c = snapshot.codeColors
         val text = c.text
+        val formula = c.formulaText
         val config = MarkdownConfig(
             colors = MarkdownColors(
                 text = text,
-                codeBackground = c.codeBlockBackground,
+                codeBackground = c.formulaBackground,
                 inlineCodeBackground = c.inlineCodeBackground,
                 dividerColor = c.divider,
                 tableBackground = c.tableBackground,
@@ -260,8 +261,8 @@ internal class DshMarkdownView : ComposeView<DshMarkdownAttr, ComposeEvent>() {
             typography = MarkdownTypography(
                 text = TextStyleConfig(fontSize = 15f, color = text, lineHeight = 23f),
                 paragraph = TextStyleConfig(fontSize = 15f, color = text, lineHeight = 23f),
-                code = TextStyleConfig(fontSize = 13f, fontFamily = "monospace", lineHeight = 19f),
-                inlineCode = TextStyleConfig(fontSize = 13f, fontFamily = "monospace"),
+                code = TextStyleConfig(fontSize = 13f, fontFamily = "monospace", color = formula, lineHeight = 19f),
+                inlineCode = TextStyleConfig(fontSize = 13f, fontFamily = "monospace", color = formula),
                 h1 = TextStyleConfig(fontSize = 24f, fontWeight = FontWeight.Bold, color = text, lineHeight = 30f),
                 h2 = TextStyleConfig(fontSize = 20f, fontWeight = FontWeight.Bold, color = text, lineHeight = 26f),
                 h3 = TextStyleConfig(fontSize = 18f, fontWeight = FontWeight.SemiBold, color = text, lineHeight = 24f),

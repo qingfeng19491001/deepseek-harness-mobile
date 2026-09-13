@@ -4,12 +4,14 @@ package com.example.dsh.theme
 enum class DshThemePreference(val storageValue: String, val label: String) {
     SYSTEM("system", "跟随系统"),
     LIGHT("light", "浅色"),
-    DARK("dark", "深色");
+    DARK("dark", "深色"),
+    AUTO("auto", "日出日落");
 
-    fun resolvedIsDark(systemDark: Boolean): Boolean = when (this) {
+    fun resolvedIsDark(systemDark: Boolean, solarNight: Boolean = systemDark): Boolean = when (this) {
         SYSTEM -> systemDark
         LIGHT -> false
         DARK -> true
+        AUTO -> solarNight
     }
 
     companion object {

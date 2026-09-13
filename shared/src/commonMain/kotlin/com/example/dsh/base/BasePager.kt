@@ -5,6 +5,8 @@ import com.example.dsh.dsh.DshRelayModule
 import com.example.dsh.dsh.DshSseModule
 import com.example.dsh.dsh.DshThemeModule
 import com.example.dsh.dsh.DshWebSocketModule
+import com.example.dsh.theme.DshCodeThemePreference
+import com.example.dsh.theme.DshSolarClock
 import com.example.dsh.theme.DshTheme
 import com.example.dsh.theme.DshThemePreference
 import com.example.dsh.theme.DshThemeSnapshot
@@ -16,6 +18,10 @@ import com.tencent.kuikly.core.module.SharedPreferencesModule
 import com.tencent.kuikly.core.nvi.serialization.json.JSONObject
 import com.tencent.kuikly.core.pager.Pager
 import com.tencent.kuikly.core.reactive.handler.*
+import com.tencent.kuikly.core.timer.setTimeout
+import kotlinx.datetime.Clock
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.offsetAt
 
 internal abstract class BasePager : Pager() {
     private var systemDark = false
@@ -43,12 +49,19 @@ internal abstract class BasePager : Pager() {
     override fun created() {
         super.created()
         systemDark = pageData.params.optBoolean(IS_NIGHT_MODE_KEY)
-        val stored = runCatching { sharedPreferences().getItem(DshTheme.PREF_KEY) }
-            .onFailure { KLog.e(TAG, "read theme preference failed: ${it.message}") }
-            .getOrNull()
-        DshTheme.bootstrap(stored?.ifEmpty { null }, systemDark)
+        val stored = readPref(DshTheme.PREF_KEY)
+        val storedCode = readPref(DshTheme.CODE_PREF_KEY)
+        val storedContrast = readPref(DshTheme.HIGH_CONTRAST_KEY) == "1"
+        DshTheme.bootstrap(
+            stored = stored,
+            systemDark = systemDark,
+            storedCodeTheme = storedCode,
+            storedHighContrast = storedContrast,
+            solarNight = currentSolarNight(),
+        )
         theme = DshTheme.snapshot
         themeCallbackRef = notifyModule().addNotify(DshTheme.EVENT) { theme = DshTheme.snapshot }
+        scheduleSolarTick()
     }
 
     override fun pageWillDestroy() {
@@ -66,17 +79,24 @@ internal abstract class BasePager : Pager() {
     }
 
     fun setThemePreference(preference: DshThemePreference) {
-        val persisted = persistThemePreference(preference)
-        if (DshTheme.setPreference(preference)) {
-            publishTheme()
-        }
-        if (!persisted) {
-            acquireModule<BridgeModule>(BridgeModule.MODULE_NAME)
-                .toast("设置未能保存，下次启动可能恢复默认")
-        }
+        persistOrToast(DshTheme.PREF_KEY, preference.storageValue)
+        DshTheme.setPreference(preference)
+        publishTheme()
     }
 
-    override fun isNightMode(): Boolean = systemDark
+    fun setCodeThemePreference(preference: DshCodeThemePreference) {
+        persistOrToast(DshTheme.CODE_PREF_KEY, preference.storageValue)
+        DshTheme.setCodeTheme(preference)
+        publishTheme()
+    }
+
+    fun setHighContrast(enabled: Boolean) {
+        persistOrToast(DshTheme.HIGH_CONTRAST_KEY, if (enabled) "1" else "0")
+        DshTheme.setHighContrast(enabled)
+        publishTheme()
+    }
+
+    override fun isNightMode(): Boolean = DshTheme.snapshot.isDark
 
     // 不开启调试UI模式
     override fun debugUIInspector(): Boolean {
@@ -91,12 +111,39 @@ internal abstract class BasePager : Pager() {
         }.onFailure { KLog.e(TAG, "applyNativeChrome failed: ${it.message}") }
     }
 
-    private fun persistThemePreference(preference: DshThemePreference): Boolean {
-        return runCatching {
-            sharedPreferences().setItem(DshTheme.PREF_KEY, preference.storageValue)
+    private fun persistOrToast(key: String, value: String) {
+        val persisted = runCatching {
+            sharedPreferences().setItem(key, value)
             true
-        }.onFailure { KLog.e(TAG, "persist theme preference failed: ${it.message}") }
+        }.onFailure { KLog.e(TAG, "persist $key failed: ${it.message}") }
             .getOrDefault(false)
+        if (!persisted) {
+            acquireModule<BridgeModule>(BridgeModule.MODULE_NAME)
+                .toast("设置未能保存，下次启动可能恢复默认")
+        }
+    }
+
+    private fun readPref(key: String): String? =
+        runCatching { sharedPreferences().getItem(key) }
+            .onFailure { KLog.e(TAG, "read $key failed: ${it.message}") }
+            .getOrNull()
+            ?.ifEmpty { null }
+
+    private fun currentSolarNight(): Boolean {
+        val now = Clock.System.now()
+        val offsetMinutes = TimeZone.currentSystemDefault().offsetAt(now).totalSeconds / 60
+        return DshSolarClock.isNight(now.toEpochMilliseconds(), offsetMinutes)
+    }
+
+    private fun scheduleSolarTick() {
+        setTimeout(pagerId, SOLAR_TICK_MS) {
+            if (DshTheme.snapshot.preference == DshThemePreference.AUTO &&
+                DshTheme.updateSolarNight(currentSolarNight())
+            ) {
+                publishTheme()
+            }
+            scheduleSolarTick()
+        }
     }
 
     private fun sharedPreferences(): SharedPreferencesModule =
@@ -107,5 +154,6 @@ internal abstract class BasePager : Pager() {
     companion object {
         const val IS_NIGHT_MODE_KEY = "isNightMode"
         private const val TAG = "BasePager"
+        private const val SOLAR_TICK_MS = 60_000
     }
 }

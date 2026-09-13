@@ -35,7 +35,12 @@ object DshThemeChrome {
         val preference = runCatching {
             context.getSharedPreferences(SP_FILE, Context.MODE_PRIVATE).getString(PREF_KEY, null)
         }.getOrNull()?.trim()?.lowercase()
-        return DshThemePreference.fromStorage(preference).resolvedIsDark(systemIsDark(context))
+        val parsed = DshThemePreference.fromStorage(preference)
+        return if (parsed == DshThemePreference.AUTO) {
+            systemIsDark(context)
+        } else {
+            parsed.resolvedIsDark(systemIsDark(context))
+        }
     }
 
     /** 刷新窗口背景、状态栏图标风格以及传入的容器视图背景。 */
