@@ -81,8 +81,14 @@ internal class DshHomePage : BasePager() {
     private var sessionRenameTargetId by observable("")
     private var sessionRenameDraft by observable("")
     private var sessionArchiveTargetId by observable("")
+    private var sessionDeleteTargetId by observable("")
     private var sessionActionBusy by observable(false)
     private var sessionActionError by observable("")
+    private var sessionSort by observable(DshSessionSort.RECENT)
+    private var canUnarchive by observable(false)
+    private var canDeleteSession by observable(false)
+    private var sessionUndoId by observable("")
+    private var sessionUndoTitle by observable("")
     private var messages by observableList<DshMessage>()
     private var conversationPanelIds by observableList<String>()
     private var activeSessionId by observable("session-1")
@@ -270,6 +276,12 @@ internal class DshHomePage : BasePager() {
                     DshTopBar(
                         title = { ctx.sessions.firstOrNull { it.id == ctx.activeSessionId }?.title ?: "DeepSeek Harness" },
                         connection = { ctx.connectionLabel },
+                        archived = { ctx.activeSessionArchived },
+                        onOpenDrawer = {
+                            ctx.dismissKeyboard()
+                            ctx.openSessionDrawer()
+                        },
+                        onManage = { ctx.openSessionManage(ctx.activeSessionId) },
                     )
                 }
 
@@ -306,6 +318,7 @@ internal class DshHomePage : BasePager() {
                                         ctx.closeSessionDrawer()
                                         setTimeout(ctx.pagerId, 0) { ctx.selectSession(id) }
                                     },
+                                    onManage = { ctx.openSessionManage(it) },
                                 )
                             }
                             val centerWidth = if (ctx.isRemoteHost) {
@@ -416,8 +429,12 @@ internal class DshHomePage : BasePager() {
                                     queueCount = { ctx.queueItems.size },
                                     jobCount = { ctx.jobItems.size },
                                     archived = { ctx.activeSessionArchived },
+                                    canUnarchive = { ctx.canUnarchive },
+                                    canDelete = { ctx.canDeleteSession },
                                     onRename = { ctx.openSessionRename(ctx.activeSessionId) },
                                     onArchive = { ctx.openSessionArchive(ctx.activeSessionId) },
+                                    onRestore = { ctx.confirmSessionUnarchive(ctx.activeSessionId) },
+                                    onDelete = { ctx.openSessionDelete(ctx.activeSessionId) },
                                 )
                             }
                         }
@@ -547,6 +564,8 @@ internal class DshHomePage : BasePager() {
                         onOpenPlugins = { ctx.openPluginMenu() },
                         onNewSession = { ctx.createSession() },
                         onOpenArchived = { ctx.archivedSessionsVisible = true },
+                        sort = { ctx.sessionSort },
+                        onSort = { ctx.applySessionSort(it) },
                         onManage = { ctx.openSessionManage(it) },
                         onSelect = { id ->
                             ctx.closeSessionDrawer()
@@ -611,7 +630,7 @@ internal class DshHomePage : BasePager() {
                     )
                 }
 
-                vif({ ctx.sessionManageTargetId.isNotEmpty() && ctx.isRemoteHost }) {
+                vif({ ctx.sessionManageTargetId.isNotEmpty() }) {
                     DshSessionManageModal(
                         title = {
                             ctx.sessions.firstOrNull { it.id == ctx.sessionManageTargetId }?.title
@@ -619,7 +638,15 @@ internal class DshHomePage : BasePager() {
                                 ?: "会话"
                         },
                         archived = {
-                            ctx.archivedSessions.any { it.id == ctx.sessionManageTargetId }
+                            ctx.archivedSessions.any { it.id == ctx.sessionManageTargetId } ||
+                                (ctx.sessionManageTargetId == ctx.activeSessionId && ctx.activeSessionArchived)
+                        },
+                        remote = { ctx.isRemoteHost },
+                        canUnarchive = { ctx.canUnarchive },
+                        canDelete = { ctx.canDeleteSession },
+                        running = {
+                            ctx.sessions.firstOrNull { it.id == ctx.sessionManageTargetId }?.running == true ||
+                                ctx.archivedSessions.firstOrNull { it.id == ctx.sessionManageTargetId }?.running == true
                         },
                         onRename = {
                             val id = ctx.sessionManageTargetId
@@ -630,6 +657,16 @@ internal class DshHomePage : BasePager() {
                             val id = ctx.sessionManageTargetId
                             ctx.sessionManageTargetId = ""
                             ctx.openSessionArchive(id)
+                        },
+                        onRestore = {
+                            val id = ctx.sessionManageTargetId
+                            ctx.sessionManageTargetId = ""
+                            ctx.confirmSessionUnarchive(id)
+                        },
+                        onDelete = {
+                            val id = ctx.sessionManageTargetId
+                            ctx.sessionManageTargetId = ""
+                            ctx.openSessionDelete(id)
                         },
                         onClose = { ctx.sessionManageTargetId = "" },
                     )
@@ -655,6 +692,20 @@ internal class DshHomePage : BasePager() {
                         busy = { ctx.sessionActionBusy },
                         error = { ctx.sessionActionError },
                         onConfirm = { ctx.confirmSessionArchive() },
+                        onClose = { ctx.closeSessionActionModals() },
+                    )
+                }
+
+                vif({ ctx.sessionDeleteTargetId.isNotEmpty() && ctx.isRemoteHost }) {
+                    DshSessionDeleteModal(
+                        title = {
+                            ctx.sessions.firstOrNull { it.id == ctx.sessionDeleteTargetId }?.title
+                                ?: ctx.archivedSessions.firstOrNull { it.id == ctx.sessionDeleteTargetId }?.title
+                                ?: "此会话"
+                        },
+                        busy = { ctx.sessionActionBusy },
+                        error = { ctx.sessionActionError },
+                        onConfirm = { ctx.confirmSessionDelete() },
                         onClose = { ctx.closeSessionActionModals() },
                     )
                 }
@@ -836,18 +887,19 @@ internal class DshHomePage : BasePager() {
                         }
                     }
                 }
+
+                vif({ ctx.sessionUndoId.isNotEmpty() }) {
+                    DshSessionUndoBar(
+                        message = { "已归档“${ctx.sessionUndoTitle}”，可撤销" },
+                        onUndo = { ctx.undoSessionArchive() },
+                    )
+                }
             }
         }
     }
 
     override fun viewDidLoad() {
         super.viewDidLoad()
-        topBarRef?.view?.event {
-            click {
-                this@DshHomePage.dismissKeyboard()
-                this@DshHomePage.openSessionDrawer()
-            }
-        }
         addTaskWhenPagerUpdateLayoutFinish {
             refreshMountedSessionRenderTrees()
         }
@@ -1038,7 +1090,7 @@ internal class DshHomePage : BasePager() {
 
     private fun refreshVisibleSessions() {
         val archivedIds = (repository as? DshRemoteRepository)?.store?.archivedSessionIds.orEmpty()
-        syncVisibleSessions(sessions, visibleSessions, archivedIds)
+        syncVisibleSessions(sessions, visibleSessions, archivedIds, sessionSort)
     }
 
     private fun loadRepository(preferredSessionId: String? = null) {
@@ -1319,6 +1371,9 @@ internal class DshHomePage : BasePager() {
         }
         if (state.phase == DshHostRuntimePhase.READY && wasReconnecting) {
             loadRepository(preferredSessionId = activeSessionId)
+        }
+        if (state.phase == DshHostRuntimePhase.READY) {
+            probeSessionLifecycle()
         }
         syncTurnStatusTicker()
     }
@@ -2133,11 +2188,13 @@ internal class DshHomePage : BasePager() {
             return
         }
         val repository = repository as? DshRemoteRepository ?: return
-        val groups = repository.workspaceGroups()
+        val groups = repository.workspaceGroups().map { group ->
+            group.copy(sessions = dshSortedSessions(group.sessions, sessionSort))
+        }
         workspaceGroups.clear()
         workspaceGroups.addAll(groups)
         archivedSessions.clear()
-        archivedSessions.addAll(repository.archivedSessions())
+        archivedSessions.addAll(dshSortedSessions(repository.archivedSessions(), sessionSort))
     }
 
     private fun handleArchivedSessionsChanged() {
@@ -2147,7 +2204,7 @@ internal class DshHomePage : BasePager() {
         if (sessionActionBusy && sessionArchiveTargetId == activeSessionId) return
         if (activeSessionArchived || !repository.store.archivedSessionIds.contains(activeSessionId)) return
         val next = dshNextUnarchivedSession(
-            sessions = sessions.toList(),
+            sessions = dshSortedSessions(sessions.toList(), sessionSort),
             archivedIds = repository.store.archivedSessionIds,
             excludedId = activeSessionId,
         )
@@ -2383,9 +2440,47 @@ internal class DshHomePage : BasePager() {
     }
 
     private fun openSessionManage(sessionId: String) {
-        if (!isRemoteHost) return
-        if (sessions.none { it.id == sessionId } && archivedSessions.none { it.id == sessionId }) return
+        if (sessionId.isEmpty()) return
+        if (isRemoteHost && sessions.none { it.id == sessionId } && archivedSessions.none { it.id == sessionId }) return
         sessionManageTargetId = sessionId
+    }
+
+    private fun applySessionSort(sort: DshSessionSort) {
+        if (sessionSort == sort) return
+        sessionSort = sort
+        refreshWorkspaceGroups()
+        refreshVisibleSessions()
+    }
+
+    private fun touchSessionActivity(sessionId: String) {
+        val now = bridgeModule.currentTimeStamp()
+        if (sessionId.isEmpty() || now <= 0L) return
+        val index = sessions.indexOfFirst { it.id == sessionId }
+        if (index >= 0 && sessions[index].updatedAt < now) {
+            sessions[index] = sessions[index].copy(updatedAt = now, updatedLabel = now.toString())
+        }
+        (repository as? DshRemoteRepository)?.store?.touchSessionActivity(sessionId, now)
+        refreshWorkspaceGroups()
+        refreshVisibleSessions()
+    }
+
+    private fun probeSessionLifecycle() {
+        val repository = repository as? DshRemoteRepository ?: return
+        if (!isRemoteHost) {
+            canUnarchive = false
+            canDeleteSession = false
+            return
+        }
+        repository.unarchiveSession("__dsh_capability_probe__") { _, error ->
+            setTimeout(pagerId, 0) {
+                canUnarchive = !dshSessionLifecycleUnsupported(error?.code.orEmpty(), error?.message.orEmpty())
+            }
+        }
+        repository.deleteSession("__dsh_capability_probe__") { _, error ->
+            setTimeout(pagerId, 0) {
+                canDeleteSession = !dshSessionLifecycleUnsupported(error?.code.orEmpty(), error?.message.orEmpty())
+            }
+        }
     }
 
     private fun openSessionRename(sessionId: String) {
@@ -2440,6 +2535,7 @@ internal class DshHomePage : BasePager() {
         val repository = repository as? DshRemoteRepository ?: return
         val sessionId = sessionArchiveTargetId
         if (sessionId.isEmpty() || sessionActionBusy) return
+        val archivedTitle = sessions.firstOrNull { it.id == sessionId }?.title ?: "此会话"
         sessionActionBusy = true
         sessionActionError = ""
         repository.archiveSession(sessionId) { _, error ->
@@ -2451,7 +2547,7 @@ internal class DshHomePage : BasePager() {
                 }
                 val wasActive = activeSessionId == sessionId
                 val next = dshNextUnarchivedSession(
-                    sessions = sessions.toList(),
+                    sessions = dshSortedSessions(sessions.toList(), sessionSort),
                     archivedIds = repository.store.archivedSessionIds,
                     excludedId = sessionId,
                 )
@@ -2463,8 +2559,108 @@ internal class DshHomePage : BasePager() {
                     if (next != null) selectSession(next.id)
                     else createSession()
                 }
+                if (canUnarchive) {
+                    sessionUndoId = sessionId
+                    sessionUndoTitle = archivedTitle
+                    setTimeout(pagerId, 5_000) {
+                        if (sessionUndoId == sessionId) {
+                            sessionUndoId = ""
+                            sessionUndoTitle = ""
+                        }
+                    }
+                }
             }
         }
+    }
+
+    private fun confirmSessionUnarchive(sessionId: String) {
+        val repository = repository as? DshRemoteRepository ?: return
+        if (!isRemoteHost || !canUnarchive || sessionId.isEmpty() || sessionActionBusy) return
+        sessionActionBusy = true
+        sessionActionError = ""
+        repository.unarchiveSession(sessionId) { _, error ->
+            setTimeout(pagerId, 0) {
+                sessionActionBusy = false
+                if (error != null) {
+                    if (dshSessionLifecycleUnsupported(error.code, error.message)) {
+                        canUnarchive = false
+                        sessionActionError = "当前 Host 不支持恢复归档，需要安装更新后的 dsh-scan-remote 插件"
+                    } else {
+                        sessionActionError = error.message
+                    }
+                    if (sessionManageTargetId.isEmpty()) sessionManageTargetId = sessionId
+                    return@setTimeout
+                }
+                sessionUndoId = ""
+                sessionUndoTitle = ""
+                activeSessionArchived = activeSessionId == sessionId &&
+                    repository.store.archivedSessionIds.contains(sessionId)
+                closeSessionActionModals()
+                refreshWorkspaceGroups()
+                refreshVisibleSessions()
+                if (activeSessionId == sessionId) activeSessionArchived = false
+            }
+        }
+    }
+
+    private fun openSessionDelete(sessionId: String) {
+        if (!isRemoteHost || !canDeleteSession) {
+            if (isRemoteHost) sessionActionError = "当前 Host 不支持永久删除"
+            return
+        }
+        val running = sessions.firstOrNull { it.id == sessionId }?.running == true ||
+            archivedSessions.firstOrNull { it.id == sessionId }?.running == true
+        if (running) {
+            sessionActionError = "运行中的会话不能删除，请先停止生成"
+            sessionManageTargetId = sessionId
+            return
+        }
+        sessionDeleteTargetId = sessionId
+        sessionActionError = ""
+    }
+
+    private fun confirmSessionDelete() {
+        val repository = repository as? DshRemoteRepository ?: return
+        val sessionId = sessionDeleteTargetId
+        if (sessionId.isEmpty() || sessionActionBusy) return
+        sessionActionBusy = true
+        sessionActionError = ""
+        repository.deleteSession(sessionId) { _, error ->
+            setTimeout(pagerId, 0) {
+                sessionActionBusy = false
+                if (error != null) {
+                    if (dshSessionLifecycleUnsupported(error.code, error.message)) {
+                        canDeleteSession = false
+                        sessionActionError = "当前 Host 不支持永久删除，需要安装更新后的 dsh-scan-remote 插件"
+                    } else {
+                        sessionActionError = error.message
+                    }
+                    return@setTimeout
+                }
+                val wasActive = activeSessionId == sessionId
+                val index = sessions.indexOfFirst { it.id == sessionId }
+                if (index >= 0) sessions.removeAt(index)
+                val next = dshNextUnarchivedSession(
+                    sessions = dshSortedSessions(sessions.toList(), sessionSort),
+                    archivedIds = repository.store.archivedSessionIds,
+                    excludedId = sessionId,
+                )
+                closeSessionActionModals()
+                refreshWorkspaceGroups()
+                refreshVisibleSessions()
+                if (wasActive) {
+                    if (next != null) selectSession(next.id)
+                    else createSession()
+                }
+            }
+        }
+    }
+
+    private fun undoSessionArchive() {
+        val sessionId = sessionUndoId
+        sessionUndoId = ""
+        sessionUndoTitle = ""
+        if (sessionId.isNotEmpty()) confirmSessionUnarchive(sessionId)
     }
 
     private fun closeSessionActionModals() {
@@ -2473,6 +2669,7 @@ internal class DshHomePage : BasePager() {
         sessionRenameTargetId = ""
         sessionRenameDraft = ""
         sessionArchiveTargetId = ""
+        sessionDeleteTargetId = ""
         sessionActionError = ""
     }
 
@@ -3142,6 +3339,7 @@ internal class DshHomePage : BasePager() {
             return
         }
         val sessionId = activeSessionId
+        touchSessionActivity(sessionId)
         val user = DshMessage("user-${messages.size}", DshMessageRole.USER, prompt)
         val assistantId = "assistant-${messages.size}"
         val reasoningId = "$assistantId-reasoning"

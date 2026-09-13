@@ -30,6 +30,8 @@ internal object DshHostProtocol {
     const val SESSION_FORK = "session.fork"
     const val SESSION_ATTACHMENT = "session.attachment"
     const val WORKSPACE_ARCHIVE_SESSION = "workspace.archiveSession"
+    const val WORKSPACE_UNARCHIVE_SESSION = "workspace.unarchiveSession"
+    const val WORKSPACE_DELETE_SESSION = "workspace.deleteSession"
     const val SETTINGS_DESCRIBE = "settings.describe"
     const val CREDENTIALS_DESCRIBE = "credentials.describe"
     const val CREDENTIALS_SET = "credentials.set"
@@ -994,15 +996,17 @@ internal class DshRemoteHostRepository(
                 val id = item.optString("sessionId")
                 if (id.isEmpty()) continue
                 val projections = item.optJSONObject("projections")?.optJSONObject("values")
+                val updatedAt = dshParseUpdatedAt(item.optLong("updatedAt"), item.optString("updatedAt"))
                 add(DshSession(
                     id = id,
                     title = projections?.optString("title")?.takeIf { it.isNotEmpty() } ?: "尚无标题",
                     workspace = "Host",
-                    updatedLabel = item.optLong("updatedAt").takeIf { it > 0 }?.toString().orEmpty(),
+                    updatedLabel = updatedAt.takeIf { it > 0 }?.toString().orEmpty(),
                     running = item.optBoolean("running"), blank = item.optBoolean("blank"), cwd = item.optString("cwd"),
                     parentSessionId = item.optString("parentSessionId").takeIf { it.isNotEmpty() },
                     origin = item.optString("origin").takeIf { it.isNotEmpty() },
                     agentPreset = item.optString("agentPreset").takeIf { it.isNotEmpty() },
+                    updatedAt = updatedAt,
                 ))
             }
         }
@@ -1360,6 +1364,47 @@ internal class DshRemoteHostRepository(
             val archivedIds = parseArchivedSessionIds(archived)
             store.replaceWorkspaceBaseline(store.workspaceBaseline, archivedIds)
             callback(value, null)
+        }
+    }
+
+    fun unarchiveSession(
+        sessionId: String,
+        callback: (JSONObject?, DshRpcError?) -> Unit,
+    ) {
+        call(DshHostProtocol.WORKSPACE_UNARCHIVE_SESSION, JSONObject().apply {
+            put("sessionId", sessionId)
+        }) { value, error ->
+            if (error != null) {
+                callback(null, error)
+                return@call
+            }
+            val archived = value?.optJSONArray("archivedSessionIds")
+            if (value == null || archived == null) {
+                callback(null, DshRpcError("bad-response", "workspace.unarchiveSession 返回了非法归档集合"))
+                return@call
+            }
+            store.replaceWorkspaceBaseline(store.workspaceBaseline, parseArchivedSessionIds(archived))
+            callback(value, null)
+        }
+    }
+
+    fun deleteSession(
+        sessionId: String,
+        callback: (JSONObject?, DshRpcError?) -> Unit,
+    ) {
+        call(DshHostProtocol.WORKSPACE_DELETE_SESSION, JSONObject().apply {
+            put("sessionId", sessionId)
+        }) { value, error ->
+            if (error != null) {
+                callback(null, error)
+                return@call
+            }
+            val archived = value?.optJSONArray("archivedSessionIds")
+            store.applySessionRemoved(sessionId)
+            if (archived != null) {
+                store.replaceWorkspaceBaseline(store.workspaceBaseline, parseArchivedSessionIds(archived))
+            }
+            callback(value ?: JSONObject(), null)
         }
     }
 
@@ -1881,11 +1926,7 @@ internal class DshRemoteHostRepository(
             }
             "host/session-removed" -> {
                 val id = payload.optString("sessionId")
-                store.sessions.remove(id)
-                store.sessionEvents.remove(id)
-                store.queueSnapshots.remove(id)
-                store.jobSnapshots.remove(id)
-                store.projections.remove(id)
+                store.applySessionRemoved(id)
             }
             "host/workspace-order-changed" -> {
                 val order = payload.optJSONArray("workspaceIds")?.toString() ?: return

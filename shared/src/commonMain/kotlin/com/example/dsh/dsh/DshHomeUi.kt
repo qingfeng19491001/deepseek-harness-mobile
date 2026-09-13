@@ -5,12 +5,52 @@ import com.tencent.kuikly.core.base.ViewContainer
 import com.tencent.kuikly.core.reactive.collection.ObservableList
 import com.tencent.kuikly.core.views.View
 
+internal enum class DshSessionSort {
+    RECENT,
+    TITLE,
+}
+
+internal fun dshSortedSessions(
+    sessions: List<DshSession>,
+    sort: DshSessionSort,
+): List<DshSession> = when (sort) {
+    DshSessionSort.RECENT -> sessions.sortedWith(
+        compareByDescending<DshSession> { it.updatedAt }.thenBy { it.title.lowercase() },
+    )
+    DshSessionSort.TITLE -> sessions.sortedBy { it.title.lowercase() }
+}
+
+internal fun dshParseUpdatedAt(rawLong: Long, rawText: String = ""): Long {
+    if (rawLong > 1_000_000_000_000L) return rawLong
+    if (rawLong > 1_000_000_000L) return rawLong * 1_000L
+    rawText.trim().toLongOrNull()?.let { parsed ->
+        if (parsed > 1_000_000_000_000L) return parsed
+        if (parsed > 1_000_000_000L) return parsed * 1_000L
+    }
+    return 0L
+}
+
+internal fun dshSessionLifecycleUnsupported(code: String, message: String = ""): Boolean {
+    val normalized = "$code $message".lowercase()
+    return code == "method-not-found" ||
+        code == "unknown-method" ||
+        code == "not-found" ||
+        code.startsWith("transport-404") ||
+        normalized.contains("unknown method") ||
+        normalized.contains("no such method") ||
+        normalized.contains("method not found")
+}
+
 internal fun syncVisibleSessions(
     source: ObservableList<DshSession>,
     dest: ObservableList<DshSession>,
     archivedIds: Set<String> = emptySet(),
+    sort: DshSessionSort = DshSessionSort.RECENT,
 ) {
-    val next = source.toList().filterNot { it.blank || archivedIds.contains(it.id) }
+    val next = dshSortedSessions(
+        source.toList().filterNot { it.blank || archivedIds.contains(it.id) },
+        sort,
+    )
     dest.diffUpdate(next) { old, new -> old.id == new.id }
     val count = minOf(dest.size, next.size)
     for (index in 0 until count) {

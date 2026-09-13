@@ -1132,6 +1132,61 @@ class DshHostStoreTest {
     }
 
     @Test
+    fun sessionListsSortByRecentActivityThenTitle() {
+        val sessions = listOf(
+            DshSession("old", "Beta", "Host", "", updatedAt = 1_000L),
+            DshSession("new", "Alpha", "Host", "", updatedAt = 3_000L),
+            DshSession("mid", "Gamma", "Host", "", updatedAt = 2_000L),
+        )
+        assertEquals(
+            listOf("new", "mid", "old"),
+            dshSortedSessions(sessions, DshSessionSort.RECENT).map { it.id },
+        )
+        assertEquals(
+            listOf("new", "old", "mid"),
+            dshSortedSessions(sessions, DshSessionSort.TITLE).map { it.id },
+        )
+    }
+
+    @Test
+    fun sessionLifecycleCapabilityDetectsMissingHostMethods() {
+        assertTrue(dshSessionLifecycleUnsupported("method-not-found"))
+        assertTrue(dshSessionLifecycleUnsupported("transport-404", "Not Found"))
+        assertFalse(dshSessionLifecycleUnsupported("session-not-found"))
+        assertFalse(dshSessionLifecycleUnsupported("session-running", "cannot delete a running session"))
+    }
+
+    @Test
+    fun parseUpdatedAtAcceptsMillisAndSeconds() {
+        assertEquals(1_700_000_000_000L, dshParseUpdatedAt(1_700_000_000_000L))
+        assertEquals(1_700_000_000_000L, dshParseUpdatedAt(1_700_000_000L))
+        assertEquals(1_700_000_000_000L, dshParseUpdatedAt(0L, "1700000000000"))
+        assertEquals(0L, dshParseUpdatedAt(0L, ""))
+    }
+
+    @Test
+    fun sessionListBaselineKeepsNewerLocalActivity() {
+        val store = DshHostStore()
+        store.replaceSessions(listOf(DshSession("s1", "One", "Host", "1", updatedAt = 9_000L)))
+        store.replaceSessions(listOf(DshSession("s1", "One", "Host", "", updatedAt = 1_000L)))
+        assertEquals(9_000L, store.sessions.getValue("s1").updatedAt)
+        store.touchSessionActivity("s1", 12_000L)
+        assertEquals(12_000L, store.sessions.getValue("s1").updatedAt)
+        store.touchSessionActivity("s1", 8_000L)
+        assertEquals(12_000L, store.sessions.getValue("s1").updatedAt)
+    }
+
+    @Test
+    fun removingASessionClearsArchiveMembership() {
+        val store = DshHostStore()
+        store.replaceSessions(listOf(DshSession("s1", "One", "Host", "")))
+        store.replaceWorkspaceBaseline("[]", setOf("s1"))
+        store.applySessionRemoved("s1")
+        assertTrue(store.sessions.isEmpty())
+        assertFalse(store.archivedSessionIds.contains("s1"))
+    }
+
+    @Test
     fun sessionForkUsesCompletedTurnAnchorAndExportIsGet() {
         val anchor = 12
         val forkPayload = JSONObject().apply {

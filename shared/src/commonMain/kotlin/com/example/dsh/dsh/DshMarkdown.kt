@@ -263,6 +263,7 @@ internal class DshMarkdownAttr : ComposeAttr() {
     var contentWidth: Float by observable(0f)
     var content: String by observable("")
     var streaming: Boolean by observable(false)
+    var darkMode: Boolean by observable(false)
     var liveContent: (() -> String)? = null
     var streamingProvider: (() -> Boolean)? = null
 }
