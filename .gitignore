@@ -12,6 +12,7 @@
 local.properties
 *.so
 *.js
+!host-plugin/**/*.js
 node_modules
 Pods
 Pods/*

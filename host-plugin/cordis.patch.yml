@@ -1,0 +1,6 @@
+# Mobile plugin inventory + safe lifecycle controls. Does not replace official
+# pluginInventory/list; it adds config, errors, enable, disable, and reload.
+- insert:
+    - id: dsh-mobile-plugin-admin
+      name: dsh-mobile-plugin-admin
+      inject: [loader, webServer]

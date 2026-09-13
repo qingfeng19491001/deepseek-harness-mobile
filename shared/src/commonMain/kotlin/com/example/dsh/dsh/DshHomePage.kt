@@ -5,33 +5,26 @@ import com.example.dsh.base.bridgeModule
 import com.example.dsh.theme.tokens
 import com.tencent.kuikly.core.annotations.Page
 import com.tencent.kuikly.core.base.*
+import com.tencent.kuikly.core.directives.scrollToPosition
 import com.tencent.kuikly.core.directives.vif
-import com.tencent.kuikly.core.directives.velse
-import com.tencent.kuikly.core.directives.vfor
-import com.tencent.kuikly.core.directives.vforLazy
-import com.tencent.kuikly.core.layout.FlexAlign
 import com.tencent.kuikly.core.log.KLog
 import com.tencent.kuikly.core.reactive.handler.observable
 import com.tencent.kuikly.core.reactive.handler.observableList
+import com.tencent.kuikly.core.reactive.collection.ObservableList
 import com.tencent.kuikly.core.views.Input
 import com.tencent.kuikly.core.views.InputView
-import com.tencent.kuikly.core.views.Image
 import com.tencent.kuikly.core.views.Modal
-import com.tencent.kuikly.core.views.Scroller
 import com.tencent.kuikly.core.views.Text
 import com.tencent.kuikly.core.views.View
-import com.tencent.kuikly.core.views.compose.Button
-import com.tencent.kuikly.core.reactive.collection.ObservableList
-import com.tencent.kuikly.core.base.attr.ImageUri
 import com.tencent.kuikly.core.module.NetworkModule
 import com.tencent.kuikly.core.module.RouterModule
 import com.tencent.kuikly.core.nvi.serialization.json.JSONObject
 import com.tencent.kuikly.core.nvi.serialization.json.JSONArray
 import com.tencent.kuikly.core.timer.setTimeout
 import com.tencent.kuikly.core.views.KeyboardParams
-import com.tencent.kuikly.core.views.List
 import com.tencent.kuikly.core.views.ListContentView
 import com.tencent.kuikly.core.views.ListView
+import com.tencent.kuikly.core.views.ScrollParams
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -40,188 +33,13 @@ import kotlinx.coroutines.launch
 import kotlin.time.TimeMark
 import kotlin.time.TimeSource
 
-private fun visibleSessionList(source: ObservableList<DshSession>): ObservableList<DshSession> =
-    ObservableList<DshSession>().also { result -> result.addAll(source.filterNot { it.blank }) }
-
-private fun mainSessionList(
-    source: ObservableList<DshSession>,
-    archived: ObservableList<DshSession>,
-): ObservableList<DshSession> {
-    val archivedIds = archived.map { it.id }.toSet()
-    return ObservableList<DshSession>().also { result ->
-        result.addAll(source.filterNot { it.blank || archivedIds.contains(it.id) })
-    }
-}
-
-internal fun dshNextUnarchivedSession(
-    sessions: List<DshSession>,
-    archivedIds: Set<String>,
-    excludedId: String,
-): DshSession? =
-    sessions.firstOrNull { !it.blank && it.id != excludedId && !archivedIds.contains(it.id) }
-        ?: sessions.firstOrNull { it.blank && it.id != excludedId && !archivedIds.contains(it.id) }
-
-internal fun visibleSkillList(source: ObservableList<DshSkill>, query: String): ObservableList<DshSkill> =
-    ObservableList<DshSkill>().also { result -> result.addAll(source.filter { it.name.startsWith(query) }) }
-
-internal fun isRemoteCatalogInvalidationEvent(event: String): Boolean = event in setOf(
-    "commands/change",
-    "skills/change",
-    "agent-preset/selected",
-    "settings/document-updated",
-    "credentials/updated",
-    "llm/adapters-updated",
-)
-
-internal fun parseGoalProjection(raw: String): DshGoalSnapshot? {
-    val root = runCatching { JSONObject(raw) }.getOrNull() ?: return null
-    val goal = root.optJSONObject("goal") ?: return null
-    val id = goal.optString("id")
-    val revision = goal.optInt("revision")
-    val objective = goal.optString("objective")
-    val phase = goal.optString("phase")
-    if (id.isEmpty() || revision <= 0 || objective.isEmpty() || phase.isEmpty() || phase == "complete") return null
-    return DshGoalSnapshot(
-        id = id,
-        revision = revision,
-        objective = objective,
-        phase = phase,
-        blockedReason = goal.optJSONObject("blockedReason")?.optString("message").orEmpty(),
-    )
-}
-
-internal fun DshToolCardType.iconAsset(): String = when (this) {
-    DshToolCardType.TERMINAL -> "tool-terminal.svg"
-    DshToolCardType.READ -> "tool-read.svg"
-    DshToolCardType.DIFF -> "tool-diff.svg"
-    DshToolCardType.SEARCH -> "tool-search.svg"
-    DshToolCardType.WEB -> "tool-web.svg"
-    DshToolCardType.JSON -> "tool-json.svg"
-    DshToolCardType.GENERIC -> "tool-generic.svg"
-}
-
-/** Remote tool-name semantics choose the icon even before a result view exists. */
-internal fun DshRemoteToolCallModel.iconAsset(): String = when (kind) {
-    DshRemoteToolKind.BASH -> "tool-terminal.svg"
-    DshRemoteToolKind.READ -> "tool-read.svg"
-    DshRemoteToolKind.FILE_MUTATION -> "tool-diff.svg"
-    DshRemoteToolKind.SEARCH -> "tool-search.svg"
-    DshRemoteToolKind.WEB -> "tool-web.svg"
-    DshRemoteToolKind.SKILL -> "tool-skill.svg"
-    DshRemoteToolKind.ASK_QUESTION -> "tool-ask.svg"
-    DshRemoteToolKind.TODO,
-    DshRemoteToolKind.GENERIC -> cardType.iconAsset()
-}
-
-internal fun String.dshLooksLikeJson(): Boolean {
-    val value = trimStart()
-    return value.startsWith("{") || value.startsWith("[")
-}
-
-internal fun String.dshReasoningSummary(running: Boolean): String {
-    val visible = trimEnd()
-    val newline = indexOf('\n')
-    if (running) {
-        val lastNewline = visible.lastIndexOf('\n')
-        return if (lastNewline < 0) visible else visible.substring(lastNewline + 1)
-    }
-    return if (newline < 0) visible else substring(0, newline)
-}
-
-internal fun contextCatalogEntries(source: JSONObject?): List<DshContextCatalogEntry> {
-    if (source?.optString("form") != "catalog") return emptyList()
-    val entries = source.optJSONArray("entries") ?: return emptyList()
-    val result = mutableListOf<DshContextCatalogEntry>()
-    for (index in 0 until entries.length()) {
-        val entry = entries.optJSONObject(index) ?: continue
-        val name = entry.optString("name")
-        if (name.isEmpty()) return emptyList()
-        result += DshContextCatalogEntry(name, entry.optString("description"))
-    }
-    return result.take(200)
-}
-
-internal fun contextSections(source: JSONObject?): List<DshContextSection> {
-    if (source?.optString("form") != "snapshot") return emptyList()
-    val sections = source.optJSONArray("sections") ?: return emptyList()
-    val result = mutableListOf<DshContextSection>()
-    for (index in 0 until sections.length()) {
-        val section = sections.optJSONObject(index) ?: continue
-        val name = section.optString("name")
-        if (name.isEmpty()) return emptyList()
-        result += DshContextSection(name, section.optString("text"))
-    }
-    return result
-}
-
-internal fun contextRecalls(source: JSONObject?): List<DshContextRecall> {
-    if (source?.optString("form") != "recall") return emptyList()
-    val references = source.optJSONArray("references") ?: return emptyList()
-    val result = mutableListOf<DshContextRecall>()
-    for (index in 0 until references.length()) {
-        val reference = references.optJSONObject(index) ?: continue
-        val label = reference.optString("label")
-        if (label.isEmpty()) return emptyList()
-        result += DshContextRecall(
-            label = label,
-            retainedMessages = reference.optInt("retainedMessages"),
-            omittedMessages = reference.optInt("omittedMessages"),
-            truncated = reference.optBoolean("truncated"),
-        )
-    }
-    return result
-}
-
-internal fun contextInstructions(source: JSONObject?): List<DshContextInstruction> {
-    if (source?.optString("form") != "instructions") return emptyList()
-    val changes = source.optJSONArray("changes") ?: return emptyList()
-    val result = mutableListOf<DshContextInstruction>()
-    for (index in 0 until changes.length()) {
-        val change = changes.optJSONObject(index) ?: continue
-        val path = change.optString("path")
-        val action = change.optString("action")
-        if (path.isEmpty() || (action != "set" && action != "replace" && action != "remove")) return emptyList()
-        result += DshContextInstruction(path, action)
-    }
-    return result
-}
-
-internal fun contextRelaySender(source: JSONObject?): String {
-    if (source?.optString("form") != "relay") return ""
-    return source.optString("senderSessionId").takeIf { it.isNotEmpty() } ?: ""
-}
-
-internal fun boundedContextText(text: String): String {
-    if (text.length <= 20_000) return text
-    return text.take(20_000) + "\n… 共 ${text.length} 字符"
-}
-
-internal fun buildQuestionAnswer(
-    question: DshPendingQuestion,
-    drafts: Map<Int, DshQuestionDraft>,
-): JSONObject {
-    return JSONObject().apply {
-        put("answers", JSONArray().apply {
-            question.questions.forEachIndexed { index, item ->
-                val draft = drafts[index] ?: DshQuestionDraft()
-                put(JSONObject().apply {
-                    put("id", item.id)
-                    put("selected", JSONArray().apply { draft.selected.forEach(::put) })
-                    if (!draft.skipped && draft.custom.isNotBlank()) put("custom", draft.custom.trim())
-                })
-            }
-        })
-    }
-}
-
-internal fun DshMessage.contextCanExpand(): Boolean {
-    return content.isNotEmpty() ||
-        contextCatalog.isNotEmpty() ||
-        contextSections.isNotEmpty() ||
-        contextRecalls.isNotEmpty() ||
-        contextInstructions.isNotEmpty() ||
-        contextRelaySender.isNotEmpty()
-}
+private const val SESSION_CACHE_WARM_LIMIT = 7
+private const val SESSION_CACHE_WARM_INTERVAL_MS = 16
+private const val SESSION_CACHE_WARM_START_DELAY_MS = 600
+private const val CONVERSATION_PANEL_CACHE_LIMIT = 8
+private const val SCROLL_SETTLE_ATTEMPTS = 6
+private val SCROLL_SETTLE_DELAYS_MS = intArrayOf(0, 16, 32, 64, 120, 200)
+private const val FOLLOW_LIST_SLACK_PX = 72f
 
 /** First usable DSH surface: local sessions, streaming Markdown, and a composer. */
 @Page("home")
@@ -255,9 +73,20 @@ internal class DshHomePage : BasePager() {
         get() = sessionScope.storageKey
 
     private var sessions by observableList<DshSession>()
+    private val visibleSessions by observableList<DshSession>()
+    private val archivedSessions by observableList<DshSession>()
+    private var archivedSessionsVisible by observable(false)
+    private var activeSessionArchived by observable(false)
+    private var sessionManageTargetId by observable("")
+    private var sessionRenameTargetId by observable("")
+    private var sessionRenameDraft by observable("")
+    private var sessionArchiveTargetId by observable("")
+    private var sessionActionBusy by observable(false)
+    private var sessionActionError by observable("")
     private var messages by observableList<DshMessage>()
     private var conversationPanelIds by observableList<String>()
     private var activeSessionId by observable("session-1")
+    private var preferBlankHomeOnNextLoad = true
     private var draft by observable("")
     private var streaming by observable(false)
     private var stopButtonVisible by observable(false)
@@ -268,6 +97,22 @@ internal class DshHomePage : BasePager() {
     private var apiKeyDraft by observable("")
     private var credentialSetupVisible by observable(false)
     private var appearanceVisible by observable(false)
+    private var pluginMenuVisible by observable(false)
+    private var pluginDetailId by observable("")
+    private var pluginConfirmAction by observable("")
+    private var pluginLoading by observable(false)
+    private var pluginRefreshing by observable(false)
+    private var pluginError by observable("")
+    private var pluginQuery by observable("")
+    private var pluginFilterId by observable(DshPluginFilter.ALL.id)
+    private var pluginWritable by observable(false)
+    private var pluginSource by observable("")
+    private val pluginEntries by observableList<DshPluginEntry>()
+    private val pluginVisibleEntries by observableList<DshPluginEntry>()
+    private val pluginPresets by observableList<DshPluginPreset>()
+    private var pluginPresetId by observable("")
+    private var pluginActionBusy by observable(false)
+    private var pluginActionError by observable("")
     private var credentialSetupBusy by observable(false)
     private var credentialSetupError by observable("")
     private var credentialSetupTitle by observable("添加一个 API Key 开始使用")
@@ -290,6 +135,8 @@ internal class DshHomePage : BasePager() {
     private val messageRowRefs = mutableMapOf<String, ViewRef<com.tencent.kuikly.core.views.DivView>>()
     private var historyRequestGeneration = 0
     private val sessionMessageStates = mutableMapOf<String, ObservableList<DshMessage>>()
+    private val conversationListEpochs = mutableMapOf<String, Int>()
+    private var conversationListEpoch by observable(0)
     private val sessionMessageReady = mutableSetOf<String>()
     private val pendingSessionSelections = mutableSetOf<String>()
     private val localReadScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -301,11 +148,15 @@ internal class DshHomePage : BasePager() {
     // at the current text segment between ordered tool cards.
     private var streamingAssistantRootId = ""
     private var streamingAssistantSegment = 0
+    // Last completed assistant when the current prompt was sent. Resync must
+    // not graft the new stream onto that bubble.
+    private var streamingTurnAnchorAssistantId = ""
     private var streamingReasoningId = ""
     private var streamingReasoningContent = ""
     private val pendingAssistantDelta = StringBuilder()
     private var assistantFlushScheduled = false
     private var scrollSettleGeneration = 0
+    private var followListTail = true
     private var perfTraceSequence = 0
     private var preloadTraceSequence = 0
     private val connectionCoordinator = DshConnectionCoordinator()
@@ -324,15 +175,6 @@ internal class DshHomePage : BasePager() {
     private var jobsNow by observable(0L)
     private var jobsClockScheduled by observable(false)
     private val workspaceGroups by observableList<DshWorkspaceGroup>()
-    private val archivedSessions by observableList<DshSession>()
-    private var archivedSessionsVisible by observable(false)
-    private var activeSessionArchived by observable(false)
-    private var sessionManageTargetId by observable("")
-    private var sessionRenameTargetId by observable("")
-    private var sessionRenameDraft by observable("")
-    private var sessionArchiveTargetId by observable("")
-    private var sessionActionBusy by observable(false)
-    private var sessionActionError by observable("")
     private val skills by observableList<DshSkill>()
     private var goalSnapshot by observable<DshGoalSnapshot?>(null)
     private var goalActionBusy by observable(false)
@@ -341,7 +183,6 @@ internal class DshHomePage : BasePager() {
     private var queueEditingText by observable("")
     private var sessionRunning by observable(false)
     private var turnElapsedMs by observable(0L)
-    private var turnShimmerOn by observable(false)
     private var turnStatusMark: TimeMark? = null
     private var turnStatusTickerGeneration = 0
     private var turnStatusClockBucket = -1L
@@ -458,7 +299,7 @@ internal class DshHomePage : BasePager() {
                             }
                             vif({ ctx.isRemoteHost }) {
                                 DshSessionRail(
-                                    sessions = { mainSessionList(ctx.sessions, ctx.archivedSessions) },
+                                    sessions = { ctx.visibleSessions },
                                     activeId = { ctx.activeSessionId },
                                     compact = false,
                                     onSelect = { id ->
@@ -496,6 +337,7 @@ internal class DshHomePage : BasePager() {
                                 onSend = { ctx.sendDraft() },
                                 onStop = { ctx.stopStream() },
                                 onDismissKeyboard = { ctx.dismissKeyboard() },
+                                onUserListScroll = { ctx.onConversationUserScroll(it) },
                                 modelLabel = { ctx.selectedModelLabel },
                                 attachmentMenuVisible = { ctx.attachmentMenuVisible },
                                 voiceActive = { ctx.voiceActive },
@@ -538,9 +380,10 @@ internal class DshHomePage : BasePager() {
                                 queueActionBusy = { ctx.queueActionBusy },
                                 queueEditingText = { ctx.queueEditingText },
                                 sessionRunning = { ctx.sessionRunning },
+                                isBlankConversation = { ctx.isBlankSession() },
+                                conversationListEpoch = { ctx.conversationListEpochFor(it) },
                                 turnReconnecting = { isReconnectLabel(ctx.connectionLabel) },
                                 turnElapsedMs = { ctx.turnElapsedMs },
-                                turnShimmerOn = { ctx.turnShimmerOn },
                                 onToggleQueue = { ctx.queueDockExpanded = !ctx.queueDockExpanded },
                                 onEditQueueItem = { ctx.editQueueItem(it) },
                                 onQueueEditingTextChange = { ctx.queueEditingText = it },
@@ -605,6 +448,7 @@ internal class DshHomePage : BasePager() {
                             onSend = { ctx.sendDraft() },
                             onStop = { ctx.stopStream() },
                             onDismissKeyboard = { ctx.dismissKeyboard() },
+                            onUserListScroll = { ctx.onConversationUserScroll(it) },
                             modelLabel = { ctx.selectedModelLabel },
                             attachmentMenuVisible = { ctx.attachmentMenuVisible },
                             voiceActive = { ctx.voiceActive },
@@ -647,9 +491,10 @@ internal class DshHomePage : BasePager() {
                             queueActionBusy = { ctx.queueActionBusy },
                             queueEditingText = { ctx.queueEditingText },
                             sessionRunning = { ctx.sessionRunning },
+                            isBlankConversation = { ctx.isBlankSession() },
+                            conversationListEpoch = { ctx.conversationListEpochFor(it) },
                             turnReconnecting = { isReconnectLabel(ctx.connectionLabel) },
                             turnElapsedMs = { ctx.turnElapsedMs },
-                            turnShimmerOn = { ctx.turnShimmerOn },
                             onToggleQueue = { ctx.queueDockExpanded = !ctx.queueDockExpanded },
                             onEditQueueItem = { ctx.editQueueItem(it) },
                             onQueueEditingTextChange = { ctx.queueEditingText = it },
@@ -690,7 +535,7 @@ internal class DshHomePage : BasePager() {
 
                 vif({ ctx.sessionDrawerVisible }) {
                     DshSessionDrawer(
-                        sessions = { ctx.sessions },
+                        sessions = { ctx.visibleSessions },
                         workspaceGroups = { ctx.workspaceGroups },
                         archivedSessions = { ctx.archivedSessions },
                         isWebTimeline = { ctx.isRemoteHost },
@@ -699,12 +544,10 @@ internal class DshHomePage : BasePager() {
                         onClose = { ctx.closeSessionDrawer() },
                         onOpenSettings = { ctx.openConnectionSettings() },
                         onOpenAppearance = { ctx.appearanceVisible = true },
+                        onOpenPlugins = { ctx.openPluginMenu() },
                         onNewSession = { ctx.createSession() },
                         onOpenArchived = { ctx.archivedSessionsVisible = true },
-                        onManage = {
-                            ctx.archivedSessionsVisible = false
-                            ctx.openSessionManage(it)
-                        },
+                        onManage = { ctx.openSessionManage(it) },
                         onSelect = { id ->
                             ctx.closeSessionDrawer()
                             setTimeout(ctx.pagerId, 0) {
@@ -718,6 +561,119 @@ internal class DshHomePage : BasePager() {
                     DshAppearanceModal(
                         onSelect = { ctx.setThemePreference(it) },
                         onClose = { ctx.appearanceVisible = false },
+                    )
+                }
+
+                vif({ ctx.pluginMenuVisible && ctx.pluginDetailId.isEmpty() }) {
+                    DshPluginInventoryModal(
+                        loading = { ctx.pluginLoading },
+                        refreshing = { ctx.pluginRefreshing },
+                        error = { ctx.pluginError },
+                        query = { ctx.pluginQuery },
+                        filterId = { ctx.pluginFilterId },
+                        writable = { ctx.pluginWritable },
+                        source = { ctx.pluginSource },
+                        entries = { ctx.pluginEntries },
+                        visible = { ctx.pluginVisibleEntries },
+                        presets = { ctx.pluginPresets },
+                        presetId = { ctx.pluginPresetId },
+                        onQueryChange = { ctx.updatePluginQuery(it) },
+                        onFilterChange = { ctx.updatePluginFilter(it) },
+                        onPresetChange = { ctx.updatePluginPreset(it) },
+                        onRefresh = { ctx.loadPluginInventory(refresh = true) },
+                        onOpen = { ctx.openPluginDetail(it) },
+                        onClose = { ctx.closePluginMenu() },
+                    )
+                }
+
+                vif({ ctx.pluginMenuVisible && ctx.pluginDetailId.isNotEmpty() && ctx.pluginConfirmAction.isEmpty() }) {
+                    DshPluginDetailModal(
+                        entry = { ctx.selectedPlugin() },
+                        writable = { ctx.pluginWritable },
+                        busy = { ctx.pluginActionBusy },
+                        error = { ctx.pluginActionError },
+                        onBack = { ctx.pluginDetailId = "" },
+                        onClose = { ctx.closePluginMenu() },
+                        onEnable = { ctx.requestPluginControl("enable") },
+                        onDisable = { ctx.requestPluginControl("disable") },
+                        onReload = { ctx.requestPluginControl("reload") },
+                    )
+                }
+
+                vif({ ctx.pluginMenuVisible && ctx.pluginConfirmAction.isNotEmpty() }) {
+                    DshPluginConfirmModal(
+                        action = { ctx.pluginConfirmAction },
+                        entry = { ctx.selectedPlugin() },
+                        busy = { ctx.pluginActionBusy },
+                        error = { ctx.pluginActionError },
+                        onConfirm = { ctx.confirmPluginControl() },
+                        onClose = { ctx.pluginConfirmAction = ""; ctx.pluginActionError = "" },
+                    )
+                }
+
+                vif({ ctx.sessionManageTargetId.isNotEmpty() && ctx.isRemoteHost }) {
+                    DshSessionManageModal(
+                        title = {
+                            ctx.sessions.firstOrNull { it.id == ctx.sessionManageTargetId }?.title
+                                ?: ctx.archivedSessions.firstOrNull { it.id == ctx.sessionManageTargetId }?.title
+                                ?: "会话"
+                        },
+                        archived = {
+                            ctx.archivedSessions.any { it.id == ctx.sessionManageTargetId }
+                        },
+                        onRename = {
+                            val id = ctx.sessionManageTargetId
+                            ctx.sessionManageTargetId = ""
+                            ctx.openSessionRename(id)
+                        },
+                        onArchive = {
+                            val id = ctx.sessionManageTargetId
+                            ctx.sessionManageTargetId = ""
+                            ctx.openSessionArchive(id)
+                        },
+                        onClose = { ctx.sessionManageTargetId = "" },
+                    )
+                }
+
+                vif({ ctx.sessionRenameTargetId.isNotEmpty() && ctx.isRemoteHost }) {
+                    DshSessionRenameModal(
+                        draft = { ctx.sessionRenameDraft },
+                        busy = { ctx.sessionActionBusy },
+                        error = { ctx.sessionActionError },
+                        onDraftChange = { ctx.sessionRenameDraft = it },
+                        onSave = { ctx.saveSessionRename() },
+                        onClose = { ctx.closeSessionActionModals() },
+                    )
+                }
+
+                vif({ ctx.sessionArchiveTargetId.isNotEmpty() && ctx.isRemoteHost }) {
+                    DshSessionArchiveModal(
+                        title = {
+                            ctx.sessions.firstOrNull { it.id == ctx.sessionArchiveTargetId }?.title
+                                ?: "此会话"
+                        },
+                        busy = { ctx.sessionActionBusy },
+                        error = { ctx.sessionActionError },
+                        onConfirm = { ctx.confirmSessionArchive() },
+                        onClose = { ctx.closeSessionActionModals() },
+                    )
+                }
+
+                vif({ ctx.archivedSessionsVisible && ctx.isRemoteHost }) {
+                    DshArchivedSessionsModal(
+                        sessions = { ctx.archivedSessions },
+                        activeId = { ctx.activeSessionId },
+                        onSelect = { id ->
+                            ctx.archivedSessionsVisible = false
+                            ctx.activeSessionArchived = true
+                            ctx.closeSessionDrawer()
+                            setTimeout(ctx.pagerId, 0) { ctx.selectSession(id) }
+                        },
+                        onManage = { id ->
+                            ctx.archivedSessionsVisible = false
+                            ctx.openSessionManage(id)
+                        },
+                        onClose = { ctx.archivedSessionsVisible = false },
                     )
                 }
 
@@ -880,70 +836,6 @@ internal class DshHomePage : BasePager() {
                         }
                     }
                 }
-                vif({ ctx.sessionManageTargetId.isNotEmpty() && ctx.isRemoteHost }) {
-                    DshSessionManageModal(
-                        title = {
-                            ctx.sessions.firstOrNull { it.id == ctx.sessionManageTargetId }?.title
-                                ?: "会话"
-                        },
-                        archived = {
-                            ctx.archivedSessions.any { it.id == ctx.sessionManageTargetId }
-                        },
-                        onRename = {
-                            val id = ctx.sessionManageTargetId
-                            ctx.sessionManageTargetId = ""
-                            ctx.openSessionRename(id)
-                        },
-                        onArchive = {
-                            val id = ctx.sessionManageTargetId
-                            ctx.sessionManageTargetId = ""
-                            ctx.openSessionArchive(id)
-                        },
-                        onClose = { ctx.sessionManageTargetId = "" },
-                    )
-                }
-                vif({ ctx.sessionRenameTargetId.isNotEmpty() && ctx.isRemoteHost }) {
-                    DshSessionRenameModal(
-                        draft = { ctx.sessionRenameDraft },
-                        busy = { ctx.sessionActionBusy },
-                        error = { ctx.sessionActionError },
-                        onDraftChange = {
-                            ctx.sessionRenameDraft = it
-                            ctx.sessionActionError = ""
-                        },
-                        onSave = { ctx.saveSessionRename() },
-                        onClose = { ctx.closeSessionActionModals() },
-                    )
-                }
-                vif({ ctx.sessionArchiveTargetId.isNotEmpty() && ctx.isRemoteHost }) {
-                    DshSessionArchiveModal(
-                        title = {
-                            ctx.sessions.firstOrNull { it.id == ctx.sessionArchiveTargetId }?.title
-                                ?: "此会话"
-                        },
-                        busy = { ctx.sessionActionBusy },
-                        error = { ctx.sessionActionError },
-                        onConfirm = { ctx.confirmSessionArchive() },
-                        onClose = { ctx.closeSessionActionModals() },
-                    )
-                }
-                vif({ ctx.archivedSessionsVisible && ctx.isRemoteHost }) {
-                    DshArchivedSessionsModal(
-                        sessions = { ctx.archivedSessions },
-                        activeId = { ctx.activeSessionId },
-                        onSelect = { id ->
-                            ctx.archivedSessionsVisible = false
-                            ctx.activeSessionArchived = true
-                            ctx.closeSessionDrawer()
-                            setTimeout(ctx.pagerId, 0) { ctx.selectSession(id) }
-                        },
-                        onManage = {
-                            ctx.archivedSessionsVisible = false
-                            ctx.openSessionManage(it)
-                        },
-                        onClose = { ctx.archivedSessionsVisible = false },
-                    )
-                }
             }
         }
     }
@@ -988,6 +880,167 @@ internal class DshHomePage : BasePager() {
         }
     }
 
+    private fun openPluginMenu() {
+        closeSessionDrawer()
+        pluginMenuVisible = true
+        pluginDetailId = ""
+        pluginConfirmAction = ""
+        pluginActionError = ""
+        loadPluginInventory(refresh = pluginEntries.isNotEmpty())
+    }
+
+    private fun closePluginMenu() {
+        pluginMenuVisible = false
+        pluginDetailId = ""
+        pluginConfirmAction = ""
+        pluginActionBusy = false
+        pluginActionError = ""
+    }
+
+    private fun selectedPlugin(): DshPluginEntry? = pluginEntries.firstOrNull { it.entryId == pluginDetailId }
+
+    private fun openPluginDetail(entryId: String) {
+        pluginDetailId = entryId
+        pluginActionError = ""
+        pluginConfirmAction = ""
+        val remote = repository as? DshRemoteRepository ?: return
+        if (pluginSource != "admin") return
+        remote.getPlugin(entryId) { entry, _ ->
+            setTimeout(pagerId, 0) {
+                if (pluginDetailId != entryId || entry == null) return@setTimeout
+                val index = pluginEntries.indexOfFirst { it.entryId == entry.entryId }
+                if (index >= 0) pluginEntries[index] = entry else pluginEntries.add(entry)
+                refreshVisiblePlugins()
+            }
+        }
+    }
+
+    private fun updatePluginQuery(query: String) {
+        pluginQuery = query
+        refreshVisiblePlugins()
+    }
+
+    private fun updatePluginFilter(filterId: String) {
+        pluginFilterId = filterId
+        refreshVisiblePlugins()
+    }
+
+    private fun updatePluginPreset(presetId: String) {
+        pluginPresetId = presetId
+        refreshVisiblePlugins()
+    }
+
+    private fun refreshVisiblePlugins() {
+        val source = if (pluginPresetId.isEmpty()) {
+            pluginEntries.toList()
+        } else {
+            pluginPresets.firstOrNull { it.id == pluginPresetId }?.rows.orEmpty()
+        }
+        val next = filterPluginEntries(source, pluginQuery, DshPluginFilter.fromId(pluginFilterId))
+        pluginVisibleEntries.diffUpdate(next) { old, new -> old.entryId == new.entryId && old.moduleName == new.moduleName }
+        val count = minOf(pluginVisibleEntries.size, next.size)
+        for (index in 0 until count) {
+            if (pluginVisibleEntries[index] != next[index]) pluginVisibleEntries[index] = next[index]
+        }
+    }
+
+    private fun applyPluginSnapshot(snapshot: DshPluginSnapshot) {
+        pluginWritable = snapshot.writable
+        pluginSource = snapshot.source
+        pluginEntries.diffUpdate(snapshot.entries) { old, new -> old.entryId == new.entryId && old.moduleName == new.moduleName }
+        val entryCount = minOf(pluginEntries.size, snapshot.entries.size)
+        for (index in 0 until entryCount) {
+            if (pluginEntries[index] != snapshot.entries[index]) pluginEntries[index] = snapshot.entries[index]
+        }
+        pluginPresets.diffUpdate(snapshot.presets) { old, new -> old.id == new.id }
+        val presetCount = minOf(pluginPresets.size, snapshot.presets.size)
+        for (index in 0 until presetCount) {
+            if (pluginPresets[index] != snapshot.presets[index]) pluginPresets[index] = snapshot.presets[index]
+        }
+        if (pluginPresetId.isNotEmpty() && pluginPresets.none { it.id == pluginPresetId }) {
+            pluginPresetId = ""
+        }
+        refreshVisiblePlugins()
+    }
+
+    private fun loadPluginInventory(refresh: Boolean) {
+        val remote = repository as? DshRemoteRepository
+        if (remote == null) {
+            pluginLoading = false
+            pluginRefreshing = false
+            pluginError = "未连接到远程 DSH"
+            return
+        }
+        if (refresh) pluginRefreshing = true else pluginLoading = true
+        if (!refresh) pluginError = ""
+        remote.loadPluginInventory(
+            onSuccess = { snapshot ->
+                setTimeout(pagerId, 0) {
+                    pluginLoading = false
+                    pluginRefreshing = false
+                    pluginError = ""
+                    applyPluginSnapshot(snapshot)
+                }
+            },
+            onError = { message ->
+                setTimeout(pagerId, 0) {
+                    pluginLoading = false
+                    pluginRefreshing = false
+                    pluginError = message
+                    if (!refresh) {
+                        pluginEntries.clear()
+                        pluginVisibleEntries.clear()
+                        pluginPresets.clear()
+                    }
+                }
+            },
+        )
+    }
+
+    private fun requestPluginControl(action: String) {
+        if (!pluginWritable || selectedPlugin()?.protectedEntry == true) return
+        pluginConfirmAction = action
+        pluginActionError = ""
+    }
+
+    private fun confirmPluginControl() {
+        val remote = repository as? DshRemoteRepository ?: return
+        val entryId = pluginDetailId
+        val action = pluginConfirmAction
+        if (entryId.isEmpty() || action.isEmpty() || pluginActionBusy) return
+        pluginActionBusy = true
+        pluginActionError = ""
+        remote.controlPlugin(entryId, action, true) { entry, error ->
+            setTimeout(pagerId, 0) {
+                pluginActionBusy = false
+                if (error != null) {
+                    pluginActionError = error.message
+                    return@setTimeout
+                }
+                pluginConfirmAction = ""
+                pluginActionError = ""
+                if (entry != null) {
+                    val index = pluginEntries.indexOfFirst { it.entryId == entry.entryId }
+                    if (index >= 0) pluginEntries[index] = entry
+                    refreshVisiblePlugins()
+                }
+                bridgeModule.toast(
+                    when (action) {
+                        "enable" -> "已请求启用"
+                        "disable" -> "已请求停用"
+                        else -> "已请求重载"
+                    },
+                )
+                loadPluginInventory(refresh = true)
+            }
+        }
+    }
+
+    private fun refreshVisibleSessions() {
+        val archivedIds = (repository as? DshRemoteRepository)?.store?.archivedSessionIds.orEmpty()
+        syncVisibleSessions(sessions, visibleSessions, archivedIds)
+    }
+
     private fun loadRepository(preferredSessionId: String? = null) {
         val hostRepository = repository ?: return
         hostRepository.loadSessions({ loaded ->
@@ -1006,21 +1059,32 @@ internal class DshHomePage : BasePager() {
             }
             sessions.clear()
             sessions.addAll(loaded)
+            refreshWorkspaceGroups()
+            refreshVisibleSessions()
             runCatching { localStore?.replaceSessions(activeConnectionId, loaded) }
             preloadAllSessionMessages()
-            refreshWorkspaceGroups()
             connectionLabel = if (loaded.isEmpty()) "已连接 · 无会话" else "已连接 · 正在同步远程历史"
             if (loaded.isNotEmpty()) {
                 val archivedIds = archivedSessions.map { it.id }.toSet()
-                val preferred = loaded.firstOrNull {
-                    it.id == preferredSessionId &&
-                        (activeSessionArchived || !archivedIds.contains(it.id))
+                val preferBlankHome = preferBlankHomeOnNextLoad
+                preferBlankHomeOnNextLoad = false
+                val nextId = if (preferBlankHome) {
+                    loaded.firstOrNull { it.blank && !archivedIds.contains(it.id) }?.id
+                } else {
+                    loaded.firstOrNull {
+                        it.id == preferredSessionId &&
+                            (activeSessionArchived || !archivedIds.contains(it.id))
+                    }?.id
+                        ?: dshNextUnarchivedSession(loaded, archivedIds, excludedId = "")?.id
+                        ?: loaded.first().id
                 }
-                val selected = preferred
-                    ?: dshNextUnarchivedSession(loaded, archivedIds, excludedId = "")
-                    ?: loaded.first()
-                activeSessionId = selected.id
-                activeSessionArchived = archivedIds.contains(selected.id)
+                if (nextId == null) {
+                    messages = ObservableList()
+                    createSession()
+                    return@loadSessions
+                }
+                activeSessionId = nextId
+                activeSessionArchived = archivedIds.contains(nextId)
                 sessionRunning = loaded.firstOrNull { it.id == activeSessionId }?.running == true
                 refreshQueueDock()
                 refreshJobsPanel()
@@ -1031,14 +1095,9 @@ internal class DshHomePage : BasePager() {
                     resyncStreamingWithHost(activeSessionId, "session-list")
                 }
             } else {
-                messages.clear()
-                messages.add(
-                    DshMessage(
-                        id = "no-session",
-                        role = DshMessageRole.ERROR,
-                        content = "当前还没有会话，打开左上角菜单后点击“新会话”即可开始。",
-                    ),
-                )
+                preferBlankHomeOnNextLoad = false
+                messages = ObservableList()
+                createSession()
             }
         }, { error ->
             if (!connectionCoordinator.isActive(connectionMode)) return@loadSessions
@@ -1084,8 +1143,8 @@ internal class DshHomePage : BasePager() {
 
 
     private fun startRelayEngine(generation: Long) {
-        if (!pageData.isAndroid && !pageData.isIOS) {
-            connectionLabel = "扫码连接目前仅支持 Android 和 iOS"
+        if (!pageData.supportsRelayBridge) {
+            connectionLabel = "扫码连接目前仅支持 Android、iOS 和 HarmonyOS"
             return
         }
         connectionLabel = "正在连接扫码电脑"
@@ -1557,7 +1616,6 @@ internal class DshHomePage : BasePager() {
             sessions.firstOrNull { it.blank }
         }
         if (blankSession != null) {
-            activeSessionArchived = false
             if (blankSession.id != activeSessionId) {
                 selectSession(blankSession.id)
             } else {
@@ -1582,6 +1640,7 @@ internal class DshHomePage : BasePager() {
             // this list also rewrites SQLite with only the newly created row.
             if (sessions.none { it.id == created.id }) {
                 sessions.add(0, created)
+                refreshVisibleSessions()
             }
             runCatching { localStore?.replaceSessions(activeConnectionId, sessions.toList()) }
             activeSessionId = sessionId
@@ -1611,7 +1670,7 @@ internal class DshHomePage : BasePager() {
         sessionId: String,
         scrollToEndAfterLoad: Boolean = true,
     ) {
-        val requestGeneration = ++historyRequestGeneration
+        ++historyRequestGeneration
 
         // Show the selected session immediately. The Host history request is
         // remote and can take a moment, so keeping the previous list here
@@ -1621,13 +1680,20 @@ internal class DshHomePage : BasePager() {
             scrollToEndAfterLoad = scrollToEndAfterLoad,
         )
         ensureConversationPanel(sessionId)
+        fetchHostHistory(sessionId, scrollToEndAfterLoad)
+    }
 
+    private fun fetchHostHistory(
+        sessionId: String,
+        scrollToEndAfterLoad: Boolean = true,
+    ) {
         if (isRemoteHost) {
             loadSkills(sessionId)
             loadWebTimeline(sessionId, scrollToEndAfterLoad)
             return
         }
 
+        val requestGeneration = historyRequestGeneration
         val hostRepository = repository ?: return
         hostRepository.loadHistory(sessionId, { loaded ->
             if (requestGeneration != historyRequestGeneration || activeSessionId != sessionId) return@loadHistory
@@ -1712,6 +1778,10 @@ internal class DshHomePage : BasePager() {
             }
             sessionMessageReady.add(sessionId)
             replaceMessagesIfChanged(projected, forceReplace)
+            if (projected.isNotEmpty()) {
+                persistMessages(sessionId)
+                sessionCacheStates[sessionId] = DshSessionCacheState.SYNCED
+            }
             projected.mapNotNull { it.attachmentId }.forEach { loadAttachment(sessionId, it) }
             completePendingSessionSelection(sessionId)
             realizeSessionAfterData(sessionId, scrollToEndAfterLoad)
@@ -1730,12 +1800,21 @@ internal class DshHomePage : BasePager() {
         DshStreamLog.i(
             "ui.resync.begin reason=$reason session=$sessionId running=$sessionRunning streaming=$streaming stop=$stopButtonVisible",
         )
+        // A local prompt is already painting this turn. Reloading the web
+        // timeline remounts every markdown bubble and delays the first token.
+        if (reason == "host-session-running" && isLocalPromptInFlight()) {
+            DshStreamLog.i(
+                "ui.resync.skip-local-stream reason=$reason session=$sessionId root=$streamingAssistantRootId",
+            )
+            return
+        }
         if (sessionRunning) {
             loadWebTimeline(sessionId, scrollToEndAfterLoad = true, forceReplace = true) {
                 resumeStreamingFromHistory(sessionId, reason)
             }
         } else {
-            loadWebTimeline(sessionId, scrollToEndAfterLoad = true, forceReplace = true) {
+            val forceReplace = streaming || stopButtonVisible
+            loadWebTimeline(sessionId, scrollToEndAfterLoad = true, forceReplace = forceReplace) {
                 finishStreamingFromHistory(sessionId)
                 connectionLabel = "已连接"
                 DshStreamLog.i("ui.resync.settled reason=$reason session=$sessionId messages=${messages.size}")
@@ -1743,8 +1822,12 @@ internal class DshHomePage : BasePager() {
         }
     }
 
+    private fun isLocalPromptInFlight(): Boolean =
+        streaming && streamingAssistantRootId.isNotEmpty()
+
     private fun rebindStreamingToHistoryTail(): Boolean {
-        val live = messages.lastOrNull { it.role == DshMessageRole.ASSISTANT && !it.isReasoning } ?: return false
+        val live = dshHistoryTailToResume(messages.toList(), streamingTurnAnchorAssistantId)
+            ?: return false
         streamingAssistantId = live.id
         streamingAssistantRootId = live.id
         streamingAssistantSegment = 0
@@ -1767,7 +1850,8 @@ internal class DshHomePage : BasePager() {
 
     private fun resumeStreamingFromHistory(sessionId: String, reason: String) {
         if (sessionId != activeSessionId) return
-        if (rebindStreamingToHistoryTail()) {
+        val rebound = rebindStreamingToHistoryTail()
+        if (rebound) {
             streaming = true
             stopButtonVisible = true
             connectionLabel = "正在生成"
@@ -1776,10 +1860,23 @@ internal class DshHomePage : BasePager() {
                 messages[index] = messages[index].copy(streaming = true)
             }
         } else {
-            streamingAssistantRootId = "assistant-adopted-${messages.size}"
-            streamingAssistantId = ""
-            streamingAssistantSegment = 0
-            streamingAssistantContent = ""
+            if (streamingAssistantRootId.isEmpty()) {
+                streamingAssistantRootId = "assistant-adopted-${messages.size}"
+            }
+            val liveStillPresent = streamingAssistantId.isNotEmpty() &&
+                messages.any { it.id == streamingAssistantId }
+            if (!liveStillPresent) {
+                val kept = streamingAssistantContent + pendingAssistantDelta.toString()
+                pendingAssistantDelta.setLength(0)
+                streamingAssistantId = ""
+                streamingAssistantSegment = 0
+                streamingAssistantContent = ""
+                if (kept.isNotEmpty()) {
+                    ensureStreamingAssistantSegment()
+                    streamingAssistantContent = kept
+                    updateStreamingMessage(kept, streaming = true)
+                }
+            }
             streaming = true
             stopButtonVisible = true
             connectionLabel = "正在生成"
@@ -1787,7 +1884,7 @@ internal class DshHomePage : BasePager() {
         attachAdoptedLiveStream(sessionId)
         syncTurnStatusTicker()
         DshStreamLog.i(
-            "ui.resync.resume reason=$reason id=${streamingAssistantId} chars=${streamingAssistantContent.length}",
+            "ui.resync.resume reason=$reason rebound=$rebound id=${streamingAssistantId.ifEmpty { streamingAssistantRootId }} chars=${streamingAssistantContent.length}",
         )
     }
 
@@ -1805,8 +1902,7 @@ internal class DshHomePage : BasePager() {
                     if (streamingAssistantRootId.isEmpty()) {
                         streamingAssistantRootId = "assistant-adopted-${messages.size}"
                     }
-                    if (streamingAssistantId.isEmpty()) ensureStreamingAssistantSegment()
-                    queueAssistantDelta(streamingAssistantId, delta)
+                    queueAssistantDelta(streamingAssistantRootId, delta)
                 }
             },
             onComplete = { result ->
@@ -1821,7 +1917,6 @@ internal class DshHomePage : BasePager() {
                 )
                 settleStreamingMessage(DshMessageRole.ASSISTANT, completedContent)
                 persistMessages(sessionId)
-                loadWebTimeline(sessionId, scrollToEndAfterLoad = false)
                 connectionLabel = "已连接"
                 streamHandle = null
             },
@@ -1836,7 +1931,6 @@ internal class DshHomePage : BasePager() {
                 DshStreamLog.i("ui.error session=$sessionId message='${DshStreamLog.preview(error)}'")
                 settleStreamingMessage(DshMessageRole.ERROR, error)
                 persistMessages(sessionId)
-                loadWebTimeline(sessionId, scrollToEndAfterLoad = false)
                 connectionLabel = "已连接"
                 streamHandle = null
             },
@@ -2049,6 +2143,7 @@ internal class DshHomePage : BasePager() {
     private fun handleArchivedSessionsChanged() {
         val repository = repository as? DshRemoteRepository ?: return
         refreshWorkspaceGroups()
+        refreshVisibleSessions()
         if (sessionActionBusy && sessionArchiveTargetId == activeSessionId) return
         if (activeSessionArchived || !repository.store.archivedSessionIds.contains(activeSessionId)) return
         val next = dshNextUnarchivedSession(
@@ -2288,12 +2383,15 @@ internal class DshHomePage : BasePager() {
     }
 
     private fun openSessionManage(sessionId: String) {
-        if (!isRemoteHost || sessions.none { it.id == sessionId }) return
+        if (!isRemoteHost) return
+        if (sessions.none { it.id == sessionId } && archivedSessions.none { it.id == sessionId }) return
         sessionManageTargetId = sessionId
     }
 
     private fun openSessionRename(sessionId: String) {
-        val current = sessions.firstOrNull { it.id == sessionId } ?: return
+        val current = sessions.firstOrNull { it.id == sessionId }
+            ?: archivedSessions.firstOrNull { it.id == sessionId }
+            ?: return
         if (!isRemoteHost) return
         sessionRenameTargetId = sessionId
         sessionRenameDraft = current.title.takeUnless { it == "尚无标题" || it == "新会话" }.orEmpty()
@@ -2326,6 +2424,7 @@ internal class DshHomePage : BasePager() {
                 val index = sessions.indexOfFirst { it.id == sessionId }
                 if (updated != null && index >= 0) sessions[index] = updated
                 refreshWorkspaceGroups()
+                refreshVisibleSessions()
                 closeSessionActionModals()
             }
         }
@@ -2359,6 +2458,7 @@ internal class DshHomePage : BasePager() {
                 if (wasActive) activeSessionArchived = true
                 closeSessionActionModals()
                 refreshWorkspaceGroups()
+                refreshVisibleSessions()
                 if (wasActive) {
                     if (next != null) selectSession(next.id)
                     else createSession()
@@ -2555,41 +2655,47 @@ internal class DshHomePage : BasePager() {
         if (cached.isEmpty()) return
         sessions.clear()
         sessions.addAll(cached)
-        val firstSessionId = cached.first().id
-        val firstMessages = runCatching { store.loadMessages(activeConnectionId, firstSessionId) }
-            .getOrDefault(emptyList())
-            .filterNot { it.isRuntimeContextSnapshot() }
-        activeSessionId = firstSessionId
-        val state = sessionMessageStates[firstSessionId] ?: ObservableList()
-        if (state.size == 1 && state.firstOrNull()?.id == "api-key-required") state.clear()
-        if (state.isEmpty() && firstMessages.isNotEmpty()) state.addAll(firstMessages)
-        sessionMessageStates[firstSessionId] = state
-        sessionMessageReady.add(firstSessionId)
-        if (isRemoteHost) {
-            sessionCacheStates[firstSessionId] = DshSessionCacheState.STALE
+        refreshVisibleSessions()
+        val homeId = cached.firstOrNull { it.blank }?.id
+        if (homeId != null) {
+            activeSessionId = homeId
+            val state = sessionMessageStates[homeId] ?: ObservableList()
+            state.clear()
+            sessionMessageStates[homeId] = state
+            sessionMessageReady.add(homeId)
+            messages = state
+            ensureConversationPanel(homeId)
+            return
         }
+        val state = ObservableList<DshMessage>()
         messages = state
-        ensureConversationPanel(firstSessionId)
+        sessionMessageStates[activeSessionId] = state
+        sessionMessageReady.add(activeSessionId)
+        ensureConversationPanel(activeSessionId)
     }
 
     private fun loadApiKeyAsync() {
+        if (isRemoteHost) return
         val store = localStore
         if (store == null) {
             showCredentialSetupIfNeeded("")
             return
         }
-        val apiKey = runCatching { store.loadApiKey() }.getOrDefault("")
-        pendingApiKey = apiKey
-        if (sshMode) {
-            connectionLabel = "等待 SSH 连接"
-        } else if (apiKey.isEmpty()) {
-            showCredentialSetupIfNeeded(apiKey)
-        } else if (engineReady && repository == null && connectionMode == DshConnectionMode.LOCAL) {
-            connectLocalEngine(apiKey)
+        localReadScope.launch {
+            val apiKey = runCatching { store.loadApiKey() }.getOrDefault("")
+            setTimeout(pagerId, 0) {
+                pendingApiKey = apiKey
+                if (apiKey.isEmpty()) {
+                    showCredentialSetupIfNeeded(apiKey)
+                } else if (engineReady && repository == null && connectionMode == DshConnectionMode.LOCAL) {
+                    connectLocalEngine(apiKey)
+                }
+            }
         }
     }
 
     private fun showCredentialSetupIfNeeded(apiKey: String) {
+        if (isRemoteHost) return
         if (pendingApiKey.isNotEmpty() || apiKey.isNotEmpty()) return
         connectionLabel = "等待配置"
         updateCredentialSetupVisibility(true)
@@ -2618,10 +2724,7 @@ internal class DshHomePage : BasePager() {
             perfLog("switch.$traceId.wait-data", startedAt)
             return
         }
-        if (!conversationPanelIds.contains(id) || !messageScrollerRefs.containsKey(id)) {
-            // Mount the target ListView first. Changing activeSessionId in the
-            // same frame would make the new panel visible before its native
-            // render tree and Markdown children exist.
+        if (!conversationPanelIds.contains(id)) {
             ensureConversationPanel(id)
             addTaskWhenPagerUpdateLayoutFinish {
                 perfLog("switch.$traceId.panel.layout-finished", startedAt)
@@ -2644,7 +2747,6 @@ internal class DshHomePage : BasePager() {
         activeSessionId = id
         activeSessionArchived =
             (repository as? DshRemoteRepository)?.store?.archivedSessionIds?.contains(id) == true
-        sessionRunning = sessions.firstOrNull { it.id == id }?.running == true
         perfLog("switch.$traceId.active-state-swapped", startedAt)
         scrollMessagesToEnd()
         addTaskWhenPagerUpdateLayoutFinish {
@@ -2656,6 +2758,7 @@ internal class DshHomePage : BasePager() {
         // starting the new one, so an old response cannot repaint this view.
         historyRequestGeneration++
         loadMessagesFromDisk(id)
+        fetchHostHistory(id)
         setTimeout(pagerId, 0) {
             if (activeSessionId == id) loadModels(id)
         }
@@ -2704,6 +2807,19 @@ internal class DshHomePage : BasePager() {
         refreshSessionRenderTree(activeSessionId)
     }
 
+    private fun isBlankSession(sessionId: String = activeSessionId): Boolean =
+        sessions.firstOrNull { it.id == sessionId }?.blank == true
+
+    private fun conversationListEpochFor(sessionId: String): Int {
+        conversationListEpoch
+        return conversationListEpochs[sessionId] ?: 0
+    }
+
+    private fun remountConversationList(sessionId: String) {
+        conversationListEpochs[sessionId] = (conversationListEpochs[sessionId] ?: 0) + 1
+        conversationListEpoch += 1
+    }
+
     private fun applyActiveSessionChrome() {
         pendingApproval = null
         pendingQuestion = null
@@ -2737,7 +2853,6 @@ internal class DshHomePage : BasePager() {
             turnStatusTickerGeneration += 1
             turnStatusMark = null
             turnElapsedMs = 0
-            turnShimmerOn = false
             turnStatusClockBucket = -1L
             return
         }
@@ -2750,7 +2865,6 @@ internal class DshHomePage : BasePager() {
             if (!isTurnStatusActive()) {
                 turnStatusMark = null
                 turnElapsedMs = 0
-                turnShimmerOn = false
                 turnStatusClockBucket = -1L
                 return
             }
@@ -2761,9 +2875,8 @@ internal class DshHomePage : BasePager() {
                 turnStatusClockBucket = clockBucket
                 turnElapsedMs = elapsed
             }
-            val shimmer = ((elapsed / 1_800L) % 2L) == 1L
-            if (turnShimmerOn != shimmer) turnShimmerOn = shimmer
-            setTimeout(pagerId, if (showClock) 1_000 else 200) { tick() }
+            val wait = if (showClock) 1_000L else (TURN_STATUS_CLOCK_AFTER_MS - elapsed).coerceAtLeast(200L)
+            setTimeout(pagerId, wait.toInt()) { tick() }
         }
         tick()
     }
@@ -2885,8 +2998,11 @@ internal class DshHomePage : BasePager() {
                         "sessionData.disk.done:$sessionId messages=${loaded.size} query=${queryMs}ms uiWait=${uiWaitMs}ms",
                         readStartedAt,
                     )
-                    if (state.isEmpty() && loaded.isNotEmpty()) {
+                    if (state.isEmpty() && loaded.isNotEmpty() &&
+                        sessions.firstOrNull { it.id == sessionId }?.blank != true
+                    ) {
                         state.addAll(loaded)
+                        remountConversationList(sessionId)
                         perfLog("sessionData.ui.applied:$sessionId messages=${loaded.size}")
                     }
                     if (conversationPanelIds.size < CONVERSATION_PANEL_CACHE_LIMIT) {
@@ -2931,8 +3047,11 @@ internal class DshHomePage : BasePager() {
                 // A remote history response or a new local prompt wins over
                 // a disk snapshot that finishes later. The state is keyed by
                 // session ID, so an inactive session can be updated safely.
-                if (state.isEmpty() && loaded.isNotEmpty()) {
+                if (state.isEmpty() && loaded.isNotEmpty() &&
+                    sessions.firstOrNull { it.id == sessionId }?.blank != true
+                ) {
                     state.addAll(loaded)
+                    remountConversationList(sessionId)
                     perfLog("sessionData.ui.applied:$sessionId messages=${loaded.size}")
                 }
                 ensureConversationPanel(sessionId)
@@ -3006,6 +3125,7 @@ internal class DshHomePage : BasePager() {
             connectionLabel = "正在创建会话"
             hostRepository.createSession(null, { sessionId ->
                 sessions.add(DshSession(sessionId, "新会话", "Host", "", blank = true))
+                refreshVisibleSessions()
                 runCatching { localStore?.replaceSessions(activeConnectionId, sessions.toList()) }
                 activeSessionId = sessionId
                 activeSessionArchived = false
@@ -3025,12 +3145,16 @@ internal class DshHomePage : BasePager() {
         val user = DshMessage("user-${messages.size}", DshMessageRole.USER, prompt)
         val assistantId = "assistant-${messages.size}"
         val reasoningId = "$assistantId-reasoning"
+        val wasEmpty = messages.isEmpty()
         messages.add(user)
         // DSH ChatView keeps the assistant node out of the flow until the
         // first token. The turn-status row ("Deep diving...") occupies that
         // gap so LazyLoop never has to realize an empty markdown bubble.
         sessionMessageStates[sessionId] = messages
+        if (wasEmpty) remountConversationList(sessionId)
+        pinFollowListTail()
         scrollMessagesToMessage(user.id)
+        streamingTurnAnchorAssistantId = messages.lastOrNull(::dshIsLiveAssistantText)?.id.orEmpty()
         streamingAssistantId = ""
         streamingAssistantRootId = assistantId
         streamingAssistantSegment = 0
@@ -3038,6 +3162,7 @@ internal class DshHomePage : BasePager() {
         streamingReasoningContent = ""
         streamingAssistantContent = ""
         pendingAssistantDelta.setLength(0)
+        assistantFlushScheduled = false
         draft = ""
         inputView?.setText("")
         streaming = true
@@ -3068,7 +3193,6 @@ internal class DshHomePage : BasePager() {
                 )
                 settleStreamingMessage(DshMessageRole.ASSISTANT, completedContent)
                 persistMessages(sessionId)
-                if (isRemoteHost) loadWebTimeline(sessionId, scrollToEndAfterLoad = false)
                 connectionLabel = "已连接"
                 streamHandle = null
             },
@@ -3083,7 +3207,6 @@ internal class DshHomePage : BasePager() {
                 DshStreamLog.i("ui.error session=$sessionId message='${DshStreamLog.preview(error)}'")
                 settleStreamingMessage(DshMessageRole.ERROR, error)
                 persistMessages(sessionId)
-                if (isRemoteHost) loadWebTimeline(sessionId, scrollToEndAfterLoad = false)
                 connectionLabel = "已连接"
                 streamHandle = null
             },
@@ -3122,6 +3245,7 @@ internal class DshHomePage : BasePager() {
         pendingAssistantDelta.setLength(0)
         streamingAssistantContent = ""
         assistantFlushScheduled = false
+        streamingTurnAnchorAssistantId = ""
         streaming = false
         stopButtonVisible = false
         syncTurnStatusTicker()
@@ -3235,7 +3359,8 @@ internal class DshHomePage : BasePager() {
         } else {
             messages.add(DshMessage(id, DshMessageRole.ASSISTANT, streamingReasoningContent, streaming = true, isReasoning = true))
         }
-        scrollMessagesToEnd()
+        realizeVisibleMessages()
+        if (followListTail) scrollMessagesToEnd()
     }
 
     private fun flushAssistantDelta() {
@@ -3245,10 +3370,13 @@ internal class DshHomePage : BasePager() {
         DshStreamLog.i(
             "ui.flush id=$streamingAssistantId chars=${streamingAssistantContent.length} preview='${DshStreamLog.preview(streamingAssistantContent)}'",
         )
-        updateStreamingMessage(streamingAssistantContent, streaming = true)
+        // Keep the ObservableList row stable while tokens arrive. `messages[i] =
+        // copy()` is remove+add; LazyLoop treats an append at currentEnd as
+        // "behind the visible range" and will not build the cell until scroll.
+        // DshMarkdown already reads `streamingAssistantContent` via liveContent.
+        insertLiveAssistantRow()
+        ensureLiveMessageCell()
         refreshSessionRenderTree(activeSessionId)
-        // Follow the assistant while SSE produces new content. The initial
-        // send still anchors on the user's message until the first delta.
         scrollMessagesToEnd()
     }
 
@@ -3266,8 +3394,42 @@ internal class DshHomePage : BasePager() {
             "$streamingAssistantRootId-segment-${streamingAssistantSegment}"
         }
         streamingAssistantId = id
-        streamingAssistantContent = ""
+        if (streamingAssistantContent.isEmpty() && pendingAssistantDelta.isEmpty()) {
+            // Inserting an empty assistant into a brand-new List (only the user
+            // bubble) is "add behind currentEnd". LazyLoop will not build that
+            // cell until a real scroll, and DshMessageRow also skips mounting
+            // Markdown when the first paint is empty. Wait for the first flush.
+            return
+        }
+        insertLiveAssistantRow()
+    }
+
+    private fun insertLiveAssistantRow() {
+        val id = streamingAssistantId
+        if (id.isEmpty() || messages.any { it.id == id }) return
+        // Keep content empty until settle. The first-flush snapshot must not
+        // become the display source; DshMarkdown reads the live buffer.
         messages.add(DshMessage(id, DshMessageRole.ASSISTANT, "", streaming = true))
+        ensureLiveMessageCell()
+    }
+
+    /**
+     * vforLazy only creates items inside `[currentStart, currentEnd)`. Appending
+     * the first assistant after the list was mounted with a single user bubble
+     * lands at `currentEnd`. `setContentOffset` is a no-op when content is
+     * shorter than the viewport (new session, first turn), so the cell never
+     * appears until the user drags. `scrollToPosition` is what actually builds it.
+     */
+    private fun ensureLiveMessageCell() {
+        if (!followListTail) return
+        val id = streamingAssistantId
+        if (id.isEmpty()) return
+        if (messageRowRefs[messageRowKey(activeSessionId, id)]?.view != null) return
+        val list = messageScrollerRefs[activeSessionId]?.view ?: return
+        val index = messages.indexOfFirst { it.id == id }
+        if (index < 0) return
+        DshStreamLog.i("ui.realize-live-cell id=$id index=$index size=${messages.size}")
+        list.scrollToPosition(index, 0f, false)
     }
 
     /** Close the current text row immediately before the next tool card. */
@@ -3279,10 +3441,12 @@ internal class DshHomePage : BasePager() {
             val index = messages.indexOfFirst { it.id == id }
             if (index >= 0) {
                 val current = messages[index]
-                if (current.content.isEmpty()) {
+                val text = current.content.ifEmpty { streamingAssistantContent }
+                if (text.isEmpty()) {
                     messages.removeAt(index)
                 } else {
-                    messages[index] = current.copy(streaming = false)
+                    messages[index] = current.copy(content = text, streaming = false)
+                    realizeVisibleMessages()
                 }
             }
         }
@@ -3301,6 +3465,7 @@ internal class DshHomePage : BasePager() {
             streaming = streaming,
             isReasoning = isReasoning,
         )
+        if (index >= messages.size - 1) realizeVisibleMessages()
     }
 
     private fun finalizeStreamingReasoning() {
@@ -3312,7 +3477,10 @@ internal class DshHomePage : BasePager() {
     }
 
     private fun scrollMessagesToEnd() {
+        if (!followListTail) return
         val generation = ++scrollSettleGeneration
+        ensureLiveMessageCell()
+        realizeVisibleMessages()
         addTaskWhenPagerUpdateLayoutFinish {
             settleScrollToEnd(generation, 0)
         }
@@ -3332,7 +3500,9 @@ internal class DshHomePage : BasePager() {
      * list walk down a few screens after launch.
      */
     private fun settleScrollToEnd(generation: Int, attempt: Int) {
-        if (generation != scrollSettleGeneration) return
+        if (generation != scrollSettleGeneration || !followListTail) return
+        ensureLiveMessageCell()
+        realizeVisibleMessages()
         scrollMessagesToEndAfterLayout()
         if (attempt >= SCROLL_SETTLE_ATTEMPTS) return
         setTimeout(pagerId, SCROLL_SETTLE_DELAYS_MS[attempt]) {
@@ -3342,7 +3512,34 @@ internal class DshHomePage : BasePager() {
         }
     }
 
+    private fun realizeVisibleMessages() {
+        val scroller = messageScrollerRefs[activeSessionId]?.view ?: return
+        val content = scroller.contentView as? ListContentView ?: return
+        content.flexNode.markDirty()
+        content.createRenderViewsOnVisibleRect()
+    }
+
+    private fun onConversationUserScroll(params: ScrollParams) {
+        val maxOffset = (params.contentHeight - params.viewHeight).coerceAtLeast(0f)
+        val nearBottom = params.offsetY >= maxOffset - FOLLOW_LIST_SLACK_PX
+        if (nearBottom) {
+            followListTail = true
+            return
+        }
+        if (params.isDragging) cancelFollowListTail()
+    }
+
+    private fun cancelFollowListTail() {
+        followListTail = false
+        scrollSettleGeneration += 1
+    }
+
+    private fun pinFollowListTail() {
+        followListTail = true
+    }
+
     private fun scrollMessagesToEndAfterLayout() {
+        if (!followListTail) return
         val scroller = messageScrollerRefs[activeSessionId]?.view ?: return
         val contentHeight = scroller.contentView?.flexNode?.layoutFrame?.height ?: return
         val viewportHeight = scroller.flexNode?.layoutFrame?.height ?: return
@@ -3386,6 +3583,7 @@ internal class DshHomePage : BasePager() {
             } else {
                 messages.add(DshMessage(id, role, finalContent, streaming = false))
             }
+            realizeVisibleMessages()
             DshStreamLog.i(
                 "ui.settle id=$id role=$role index=$index chars=${finalContent.length} preview='${DshStreamLog.preview(finalContent)}'",
             )
@@ -3399,11 +3597,15 @@ internal class DshHomePage : BasePager() {
             addTaskWhenPagerUpdateLayoutFinish {
                 if (activeSessionId != sessionId) return@addTaskWhenPagerUpdateLayoutFinish
                 if (!streaming && streamingAssistantId == id) {
-                    streamingAssistantId = ""
-                    streamingAssistantRootId = ""
-                    streamingAssistantSegment = 0
-                    if (streamingAssistantContent == finalContent) {
-                        streamingAssistantContent = ""
+                    val stored = messages.firstOrNull { it.id == id }?.content.orEmpty()
+                    if (stored.length >= finalContent.length) {
+                        streamingAssistantId = ""
+                        streamingAssistantRootId = ""
+                        streamingAssistantSegment = 0
+                        streamingTurnAnchorAssistantId = ""
+                        if (streamingAssistantContent == finalContent) {
+                            streamingAssistantContent = ""
+                        }
                     }
                 }
                 refreshSessionRenderTree(sessionId)
@@ -3426,6 +3628,7 @@ internal class DshHomePage : BasePager() {
         streamingAssistantId = ""
         streamingAssistantRootId = ""
         streamingAssistantSegment = 0
+        streamingTurnAnchorAssistantId = ""
         streamingReasoningId = ""
         streamingReasoningContent = ""
         pendingAssistantDelta.setLength(0)
@@ -3452,13 +3655,38 @@ internal class DshHomePage : BasePager() {
             )
             return
         }
-        if (messages.toList() == filtered) return
+        val current = messages.toList()
+        if (current == filtered) return
+        if (dshMessagesVisuallyEqual(current, filtered)) {
+            DshStreamLog.i(
+                "ui.replace-messages skip-visual-equal from=${current.size} force=$force",
+            )
+            return
+        }
+        val remount = current.isEmpty() && filtered.isNotEmpty()
         DshStreamLog.i(
-            "ui.replace-messages from=${messages.size} to=${filtered.size} streaming=$streaming force=$force preview='${DshStreamLog.preview(filtered.lastOrNull()?.content.orEmpty())}'",
+            "ui.replace-messages from=${current.size} to=${filtered.size} streaming=$streaming force=$force remount=$remount preview='${DshStreamLog.preview(filtered.lastOrNull()?.content.orEmpty())}'",
         )
-        messages.clear()
-        messages.addAll(filtered)
+        applyMessagesInPlace(filtered)
         sessionMessageStates[activeSessionId] = messages
+        if (remount) remountConversationList(activeSessionId)
+    }
+
+    private fun applyMessagesInPlace(next: List<DshMessage>) {
+        val shared = minOf(messages.size, next.size)
+        for (index in 0 until shared) {
+            if (messages[index] != next[index]) messages[index] = next[index]
+        }
+        when {
+            next.size < messages.size -> {
+                for (index in messages.lastIndex downTo next.size) {
+                    messages.removeAt(index)
+                }
+            }
+            next.size > messages.size -> {
+                messages.addAll(next.subList(messages.size, next.size))
+            }
+        }
     }
 
     companion object {
@@ -3470,2190 +3698,3 @@ internal class DshHomePage : BasePager() {
         private const val STREAM_FLUSH_INTERVAL_MS = 16
     }
 }
-
-private fun ViewContainer<*, *>.DshConnectionSettingsModal(
-    sshMode: () -> Boolean,
-    host: () -> String,
-    user: () -> String,
-    port: () -> String,
-    dshPort: () -> String,
-    keyLabel: () -> String,
-    keyPassphrase: () -> String,
-    busy: () -> Boolean,
-    error: () -> String,
-    onModeChange: (Boolean) -> Unit,
-    onHostChange: (String) -> Unit,
-    onUserChange: (String) -> Unit,
-    onPortChange: (String) -> Unit,
-    onDshPortChange: (String) -> Unit,
-    onPickKey: () -> Unit,
-    onPassphraseChange: (String) -> Unit,
-    onTrustFingerprint: () -> Unit,
-    onSave: () -> Unit,
-    onClose: () -> Unit,
-    onOpenApiKey: () -> Unit,
-) {
-    Modal(inWindow = true) {
-        attr { absolutePositionAllZero(); allCenter(); backgroundColor(tokens.scrim); padding(20f) }
-        View {
-            attr {
-                width(pagerData.pageViewWidth - 40f)
-                maxWidth(440f)
-                flexDirectionColumn()
-                padding(22f)
-                borderRadius(16f)
-                backgroundColor(tokens.surface)
-            }
-            View {
-                attr { height(32f); flexDirectionRow(); alignItemsCenter() }
-                Text { attr { text("连接设置"); flex(1f); fontSize(20f); fontWeightBold(); color(tokens.primaryText) } }
-                View { attr { size(32f, 32f); allCenter() }; Image { attr { src(ImageUri.commonAssets("x.svg")); size(20f, 20f); tintColor(tokens.icon) } }; DshHitButton { if (!busy()) onClose() } }
-            }
-            Text { attr { text("选择 Agent 运行位置"); marginTop(16f); fontSize(13f); color(tokens.secondaryText) } }
-            View {
-                attr { height(42f); marginTop(8f); flexDirectionRow(); borderRadius(8f); backgroundColor(tokens.surfaceVariant); padding(4f) }
-                View {
-                    attr { flex(1f); height(34f); flexDirectionRow(); alignItemsCenter(); justifyContentCenter(); backgroundColor(if (!sshMode()) tokens.surfaceElevated else Color.TRANSPARENT); borderRadius(6f) }
-                    Text { attr { text("扫码连接"); fontSize(13f); color(if (!sshMode()) tokens.primary else tokens.secondaryText) } }
-                    event { click { onModeChange(false) } }
-                }
-                View {
-                    attr { flex(1f); height(34f); flexDirectionRow(); alignItemsCenter(); justifyContentCenter(); backgroundColor(if (sshMode()) tokens.surfaceElevated else Color.TRANSPARENT); borderRadius(6f) }
-                    Text { attr { text("SSH 连接电脑"); fontSize(13f); color(if (sshMode()) tokens.primary else tokens.secondaryText) } }
-                    event { click { onModeChange(true) } }
-                }
-            }
-            vif({ !sshMode() }) {
-                Text { attr { text("扫码模式连接电脑上的 DSH。返回连接页可重新扫码或更换电脑。"); marginTop(16f); fontSize(14f); lineHeight(21f); color(tokens.secondaryText) } }
-                View {
-                    attr { height(40f); marginTop(16f); flexDirectionRow(); justifyContentFlexEnd() }
-                    Button { attr { width(132f); height(40f); borderRadius(8f); backgroundColor(tokens.primary); titleAttr { text("返回连接页"); fontSize(14f); color(tokens.onPrimary) } }; event { click { if (!busy()) onSave() } } }
-                }
-            }
-            velse {
-                DshConnectionInput("SSH 主机", host, "例如 100.86.12.34 或 computer.example.com", onHostChange)
-                DshConnectionInput("SSH 用户名", user, "例如 alex", onUserChange)
-                View { attr { flexDirectionRow(); marginTop(12f) }; DshConnectionInput("SSH 端口", port, "22", onPortChange, 0.5f); DshConnectionInput("远程 DSH 端口", dshPort, "3080", onDshPortChange, 0.5f, 10f) }
-                View {
-                    attr { height(44f); marginTop(12f); flexDirectionRow(); alignItemsCenter(); paddingLeft(12f); paddingRight(10f); borderRadius(8f); backgroundColor(tokens.surfaceVariant) }
-                    Text { attr { text(keyLabel()); flex(1f); fontSize(13f); color(tokens.secondaryText) } }
-                    Text { attr { text(if (busy()) "导入中..." else "选择私钥"); fontSize(13f); color(tokens.primary) }; event { click { if (!busy()) onPickKey() } } }
-                }
-                DshConnectionInput("私钥口令（如有）", keyPassphrase, "仅本次连接使用", onPassphraseChange, password = true)
-                vif({ error().startsWith("首次连接需要确认主机指纹：") }) {
-                    View {
-                        attr { marginTop(10f); padding(10f); borderRadius(8f); backgroundColor(tokens.warning.background) }
-                        Text { attr { text("请确认这是你电脑的 SSH 主机指纹。确认后会保存，指纹变化时连接将被拒绝。"); fontSize(12f); lineHeight(18f); color(tokens.warning.foreground) } }
-                        Text { attr { text("信任此指纹并连接"); marginTop(8f); fontSize(13f); color(tokens.primary) }; event { click { if (!busy()) onTrustFingerprint() } } }
-                    }
-                }
-                vif({ error().isNotEmpty() && !error().startsWith("首次连接需要确认主机指纹：") }) {
-                    Text { attr { text(error()); marginTop(8f); fontSize(12f); lineHeight(18f); color(tokens.error.foreground) } }
-                }
-                View { attr { marginTop(18f); height(40f); flexDirectionRow(); justifyContentFlexEnd() }; Button { attr { width(132f); height(40f); borderRadius(8f); backgroundColor(if (busy()) tokens.primaryDisabled else tokens.primary); titleAttr { text(if (busy()) "连接中..." else "保存并连接"); fontSize(14f); color(tokens.onPrimary) } }; event { click { if (!busy()) onSave() } } } }
-            }
-        }
-    }
-}
-
-private fun ViewContainer<*, *>.DshConnectionInput(
-    title: String,
-    value: () -> String,
-    hint: String,
-    onChange: (String) -> Unit,
-    flexValue: Float = 1f,
-    marginLeft: Float = 0f,
-    password: Boolean = false,
-) {
-    View {
-        attr { flex(flexValue); marginLeft(marginLeft); flexDirectionColumn() }
-        Text { attr { text(title); marginTop(10f); fontSize(12f); color(tokens.secondaryText) } }
-        View {
-            attr { height(40f); marginTop(5f); borderRadius(8f); border(Border(1f, BorderStyle.SOLID, tokens.divider)); backgroundColor(tokens.surfaceVariant); paddingLeft(10f); paddingRight(10f) }
-            Input {
-                ref { it.view?.setText(value()) }
-                attr { flex(1f); fontSize(14f); color(tokens.primaryText); placeholder(hint); placeholderColor(tokens.tertiaryText); returnKeyTypeDone(); if (password) keyboardTypePassword() }
-                event { textDidChange { onChange(it.text) } }
-            }
-        }
-    }
-}
-
-private fun ViewContainer<*, *>.DshCredentialSetupModal(
-    title: () -> String,
-    busy: () -> Boolean,
-    error: () -> String,
-    inputRef: (ViewRef<InputView>) -> Unit,
-    onApiKeyChange: (String) -> Unit,
-    onSave: () -> Unit,
-    onClose: () -> Unit,
-) {
-    Modal(inWindow = true) {
-        attr {
-            absolutePositionAllZero()
-            allCenter()
-            paddingLeft(20f)
-            paddingRight(20f)
-            backgroundColor(tokens.scrim)
-        }
-        View {
-            attr {
-                width(pagerData.pageViewWidth - 40f)
-                maxWidth(420f)
-                flexDirectionColumn()
-                padding(24f)
-                borderRadius(18f)
-                backgroundColor(tokens.surface)
-            }
-            View {
-                attr {
-                    height(32f)
-                    flexDirectionRow()
-                    alignItemsCenter()
-                }
-                Text {
-                    attr {
-                        text(title())
-                        flex(1f)
-                        fontSize(20f)
-                        fontWeightBold()
-                        color(tokens.primaryText)
-                    }
-                }
-                View {
-                    attr {
-                        size(32f, 32f)
-                        allCenter()
-                    }
-                    Image {
-                        attr {
-                            src(ImageUri.commonAssets("x.svg"))
-                            size(20f, 20f)
-                            tintColor(tokens.icon)
-                        }
-                    }
-                    DshHitButton { if (!busy()) onClose() }
-                }
-            }
-            Text {
-                attr {
-                    text(if (title().contains("电脑端")) "确认后将修改电脑端 DSH 的凭据。" else "配置 DeepSeek 官方模型，即可开始使用。")
-                    marginTop(8f)
-                    fontSize(14f)
-                    lineHeight(21f)
-                    color(tokens.secondaryText)
-                }
-            }
-            Text {
-                attr {
-                    text("API Key")
-                    marginTop(22f)
-                    fontSize(13f)
-                    fontWeightMedium()
-                    color(tokens.primaryText)
-                }
-            }
-            View {
-                attr {
-                    height(46f)
-                    marginTop(8f)
-                    borderRadius(8f)
-                    border(Border(1f, BorderStyle.SOLID, if (error().isEmpty()) tokens.divider else tokens.error.foreground))
-                    backgroundColor(tokens.surfaceVariant)
-                    paddingLeft(12f)
-                    paddingRight(12f)
-                }
-                Input {
-                    ref { inputRef(it) }
-                    attr {
-                        flex(1f)
-                        fontSize(15f)
-                        color(tokens.primaryText)
-                        placeholder("输入 DeepSeek API Key")
-                        placeholderColor(tokens.tertiaryText)
-                        keyboardTypePassword()
-                        returnKeyTypeDone()
-                        autofocus(true)
-                        editable(!busy())
-                    }
-                    event {
-                        textDidChange { onApiKeyChange(it.text) }
-                        inputReturn { if (!busy()) onSave() }
-                    }
-                }
-            }
-            vif({ error().isNotEmpty() }) {
-                Text {
-                    attr {
-                        text(error())
-                        marginTop(8f)
-                        fontSize(12f)
-                        lineHeight(18f)
-                        color(tokens.error.foreground)
-                    }
-                }
-            }
-            View {
-                attr {
-                    marginTop(24f)
-                    height(40f)
-                    flexDirectionRow()
-                    justifyContentFlexEnd()
-                }
-                Button {
-                    attr {
-                        width(132f)
-                        height(40f)
-                        borderRadius(8f)
-                        backgroundColor(if (busy()) tokens.primaryDisabled else tokens.primary)
-                        titleAttr {
-                            text(if (busy()) "保存中..." else "保存并继续")
-                            fontSize(14f)
-                            color(tokens.onPrimary)
-                        }
-                    }
-                    event { click { if (!busy()) onSave() } }
-                }
-            }
-        }
-    }
-}
-
-private fun ViewContainer<*, *>.DshSessionDrawer(
-    sessions: () -> ObservableList<DshSession>,
-    workspaceGroups: () -> ObservableList<DshWorkspaceGroup>,
-    archivedSessions: () -> ObservableList<DshSession>,
-    isWebTimeline: () -> Boolean,
-    activeId: () -> String,
-    animated: () -> Boolean,
-    onClose: () -> Unit,
-    onOpenSettings: () -> Unit,
-    onOpenAppearance: () -> Unit,
-    onNewSession: () -> Unit,
-    onOpenArchived: () -> Unit,
-    onManage: (String) -> Unit,
-    onSelect: (String) -> Unit,
-) {
-    Modal(inWindow = true) {
-        attr {
-            absolutePositionAllZero()
-            flexDirectionRow()
-            backgroundColor(Color.TRANSPARENT)
-        }
-        View {
-            attr {
-                width((pagerData.pageViewWidth - 44f).coerceAtMost(340f))
-                height(pagerData.pageViewHeight)
-                flexDirectionColumn()
-                paddingTop(pagerData.statusBarHeight + 10f)
-                paddingLeft(14f)
-                paddingRight(14f)
-                paddingBottom(18f)
-                backgroundColor(tokens.background)
-                transform(Translate(if (animated()) 0f else -1f, 0f))
-                animation(Animation.easeOut(0.24f), animated())
-            }
-            View {
-                attr {
-                    height(48f)
-                    flexDirectionRow()
-                    alignItemsCenter()
-                }
-                Image {
-                    attr {
-                        src(ImageUri.commonAssets("wordmark.svg"))
-                        width(118f)
-                        height(28f)
-                        tintColor(tokens.primaryText)
-                    }
-                }
-                View { attr { flex(1f) } }
-                View {
-                    attr { size(38f, 38f); allCenter() }
-                    Image { attr { src(ImageUri.commonAssets("x.svg")); size(22f, 22f); tintColor(tokens.icon) } }
-                    event { click { onClose() } }
-                }
-            }
-            View {
-                attr {
-                    height(42f)
-                    marginTop(8f)
-                    flexDirectionRow()
-                    alignItemsCenter()
-                    paddingLeft(12f)
-                    paddingRight(12f)
-                    borderRadius(9f)
-                    backgroundColor(tokens.surfaceVariant)
-                }
-                Image { attr { src(ImageUri.commonAssets("plus.svg")); size(20f, 20f); tintColor(tokens.icon) } }
-                Text {
-                    attr {
-                        text("新会话")
-                        marginLeft(10f)
-                        fontSize(14f)
-                        fontWeightMedium()
-                        color(tokens.primaryText)
-                    }
-                }
-                event { click { onNewSession() } }
-            }
-            View {
-                attr {
-                    height(42f)
-                    marginTop(8f)
-                    flexDirectionRow()
-                    alignItemsCenter()
-                    paddingLeft(12f)
-                    paddingRight(12f)
-                    borderRadius(9f)
-                    backgroundColor(Color.TRANSPARENT)
-                }
-                Image { attr { src(ImageUri.commonAssets("appearance.svg")); size(20f, 20f); tintColor(tokens.icon) } }
-                Text {
-                    attr {
-                        text("外观")
-                        marginLeft(10f)
-                        fontSize(14f)
-                        fontWeightMedium()
-                        color(tokens.secondaryText)
-                    }
-                }
-                event { click { onOpenAppearance() } }
-            }
-            View {
-                attr {
-                    height(42f)
-                    marginTop(8f)
-                    flexDirectionRow()
-                    alignItemsCenter()
-                    paddingLeft(12f)
-                    paddingRight(12f)
-                    borderRadius(9f)
-                    backgroundColor(Color.TRANSPARENT)
-                }
-                Image { attr { src(ImageUri.commonAssets("sliders.svg")); size(20f, 20f); tintColor(tokens.icon) } }
-                Text {
-                    attr {
-                        text("连接设置")
-                        marginLeft(10f)
-                        fontSize(14f)
-                        fontWeightMedium()
-                        color(tokens.secondaryText)
-                    }
-                }
-                event { click { onOpenSettings() } }
-            }
-            Text {
-                attr {
-                    text("会话")
-                    marginTop(20f)
-                    marginBottom(8f)
-                    fontSize(12f)
-                    color(tokens.captionText)
-                }
-            }
-            vif({ isWebTimeline() }) {
-                View {
-                    attr {
-                        height(40f)
-                        marginBottom(8f)
-                        flexDirectionRow()
-                        alignItemsCenter()
-                        paddingLeft(12f)
-                        paddingRight(12f)
-                        borderRadius(9f)
-                        backgroundColor(tokens.surfaceVariant)
-                    }
-                    Text {
-                        attr {
-                            text("已归档会话")
-                            flex(1f)
-                            fontSize(13f)
-                            color(tokens.secondaryText)
-                        }
-                    }
-                    Text {
-                        attr {
-                            text("${archivedSessions().size}")
-                            fontSize(12f)
-                            color(tokens.tertiaryText)
-                        }
-                    }
-                    event { click { onOpenArchived() } }
-                }
-            }
-            vif({ !isWebTimeline() }) {
-                Text {
-                    attr {
-                        text("重命名与归档仅在远程 Host 模式可用")
-                        marginBottom(8f)
-                        fontSize(11f)
-                        color(tokens.tertiaryText)
-                    }
-                }
-            }
-            Scroller {
-                attr { flex(1f) }
-                vif({ !isWebTimeline() }) {
-                    vfor({ visibleSessionList(sessions()) }) { session ->
-                        DshSessionDrawerRow(
-                            title = session.title,
-                            subtitle = session.workspace,
-                            active = activeId() == session.id,
-                            running = session.running,
-                            onSelect = { onSelect(session.id) },
-                        )
-                    }
-                }
-                vif({ isWebTimeline() }) {
-                    vfor({ workspaceGroups() }) { group ->
-                        View {
-                            attr {
-                                marginTop(10f)
-                                marginBottom(6f)
-                                flexDirectionColumn()
-                            }
-                            Text {
-                                attr {
-                                    text(group.title + if (group.path.isEmpty()) "" else " · ${group.path}")
-                                    lines(1)
-                                    fontSize(12f)
-                                    fontWeightMedium()
-                                    color(tokens.secondaryText)
-                                }
-                            }
-                            group.sessions.forEach { session ->
-                                DshSessionDrawerRow(
-                                    title = session.title,
-                                    subtitle = if (session.cwd.isEmpty()) group.title else session.cwd,
-                                    active = activeId() == session.id,
-                                    running = session.running,
-                                    onManage = { onManage(session.id) },
-                                    onSelect = { onSelect(session.id) },
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        View {
-            attr {
-                flex(1f)
-                height(pagerData.pageViewHeight)
-            }
-            event { click { onClose() } }
-        }
-    }
-}
-
-private fun ViewContainer<*, *>.DshSessionDrawerRow(
-    title: String,
-    subtitle: String,
-    active: Boolean,
-    running: Boolean,
-    onManage: (() -> Unit)? = null,
-    onSelect: () -> Unit,
-) {
-    View {
-        attr {
-            height(48f)
-            marginBottom(4f)
-            flexDirectionRow()
-            alignItemsCenter()
-            paddingLeft(12f)
-            paddingRight(10f)
-            borderRadius(9f)
-            backgroundColor(if (active) tokens.selectedSurface else Color.TRANSPARENT)
-        }
-        View {
-            attr {
-                size(7f, 7f)
-                borderRadius(4f)
-                backgroundColor(if (running) tokens.primary else tokens.tertiaryText)
-            }
-        }
-        View {
-            attr {
-                flex(1f)
-                marginLeft(10f)
-                flexDirectionColumn()
-                justifyContentCenter()
-            }
-            Text {
-                attr {
-                    text(title)
-                    lines(1)
-                    fontSize(14f)
-                    color(tokens.primaryText)
-                }
-            }
-            Text {
-                attr {
-                    text(subtitle)
-                    lines(1)
-                    marginTop(2f)
-                    fontSize(10f)
-                    color(tokens.tertiaryText)
-                }
-            }
-            if (onManage != null) {
-                event { click { onSelect() } }
-            }
-        }
-        if (onManage == null) {
-            event { click { onSelect() } }
-        } else {
-            Text {
-                attr {
-                    text("管理")
-                    width(42f)
-                    height(32f)
-                    textAlignCenter()
-                    fontSize(11f)
-                    color(tokens.primary)
-                }
-                event { click { onManage() } }
-            }
-        }
-    }
-}
-
-private fun ViewContainer<*, *>.DshSessionManageModal(
-    title: () -> String,
-    archived: () -> Boolean,
-    onRename: () -> Unit,
-    onArchive: () -> Unit,
-    onClose: () -> Unit,
-) {
-    Modal(inWindow = true) {
-        attr {
-            absolutePositionAllZero()
-            allCenter()
-            paddingLeft(20f)
-            paddingRight(20f)
-            backgroundColor(tokens.scrim)
-        }
-        View {
-            attr {
-                width(pagerData.pageViewWidth - 40f)
-                maxWidth(420f)
-                padding(20f)
-                borderRadius(16f)
-                backgroundColor(tokens.surface)
-            }
-            Text {
-                attr {
-                    text(title())
-                    fontSize(18f)
-                    fontWeightBold()
-                    color(tokens.primaryText)
-                    lines(2)
-                }
-            }
-            Text {
-                attr {
-                    text("重命名")
-                    height(42f)
-                    marginTop(18f)
-                    textAlignCenter()
-                    fontSize(14f)
-                    color(tokens.primary)
-                    backgroundColor(tokens.surfaceVariant)
-                    borderRadius(8f)
-                }
-                event { click { onRename() } }
-            }
-            vif({ !archived() }) {
-                Text {
-                    attr {
-                        text("归档")
-                        height(42f)
-                        marginTop(10f)
-                        textAlignCenter()
-                        fontSize(14f)
-                        color(tokens.error.foreground)
-                        backgroundColor(tokens.surfaceVariant)
-                        borderRadius(8f)
-                    }
-                    event { click { onArchive() } }
-                }
-            }
-            Text {
-                attr {
-                    text("取消")
-                    height(40f)
-                    marginTop(12f)
-                    textAlignCenter()
-                    fontSize(14f)
-                    color(tokens.secondaryText)
-                }
-                event { click { onClose() } }
-            }
-        }
-    }
-}
-
-private fun ViewContainer<*, *>.DshSessionRenameModal(
-    draft: () -> String,
-    busy: () -> Boolean,
-    error: () -> String,
-    onDraftChange: (String) -> Unit,
-    onSave: () -> Unit,
-    onClose: () -> Unit,
-) {
-    Modal(inWindow = true) {
-        attr {
-            absolutePositionAllZero()
-            allCenter()
-            paddingLeft(20f)
-            paddingRight(20f)
-            backgroundColor(tokens.scrim)
-        }
-        View {
-            attr {
-                width(pagerData.pageViewWidth - 40f)
-                maxWidth(420f)
-                padding(20f)
-                borderRadius(16f)
-                backgroundColor(tokens.surface)
-            }
-            Text {
-                attr {
-                    text("重命名会话")
-                    fontSize(18f)
-                    fontWeightBold()
-                    color(tokens.primaryText)
-                }
-            }
-            Input {
-                attr {
-                    height(40f)
-                    marginTop(14f)
-                    fontSize(14f)
-                    color(tokens.primaryText)
-                    placeholder("输入会话名称")
-                    placeholderColor(tokens.tertiaryText)
-                    text(draft())
-                    returnKeyTypeDone()
-                }
-                event {
-                    textDidChange { onDraftChange(it.text) }
-                    inputReturn { if (!busy()) onSave() }
-                }
-            }
-            vif({ error().isNotEmpty() }) {
-                Text {
-                    attr {
-                        text(error())
-                        marginTop(8f)
-                        fontSize(12f)
-                        lineHeight(18f)
-                        color(tokens.error.foreground)
-                    }
-                }
-            }
-            View {
-                attr {
-                    height(40f)
-                    marginTop(18f)
-                    flexDirectionRow()
-                    justifyContentFlexEnd()
-                }
-                Text {
-                    attr {
-                        text("取消")
-                        width(78f)
-                        height(38f)
-                        textAlignCenter()
-                        fontSize(14f)
-                        color(tokens.secondaryText)
-                    }
-                    event { click { if (!busy()) onClose() } }
-                }
-                Text {
-                    attr {
-                        text(if (busy()) "保存中..." else "保存")
-                        width(88f)
-                        height(38f)
-                        marginLeft(8f)
-                        textAlignCenter()
-                        fontSize(14f)
-                        color(if (busy()) tokens.primaryDisabled else tokens.primary)
-                    }
-                    event { click { if (!busy()) onSave() } }
-                }
-            }
-        }
-    }
-}
-
-private fun ViewContainer<*, *>.DshSessionArchiveModal(
-    title: () -> String,
-    busy: () -> Boolean,
-    error: () -> String,
-    onConfirm: () -> Unit,
-    onClose: () -> Unit,
-) {
-    Modal(inWindow = true) {
-        attr {
-            absolutePositionAllZero()
-            allCenter()
-            paddingLeft(20f)
-            paddingRight(20f)
-            backgroundColor(tokens.scrim)
-        }
-        View {
-            attr {
-                width(pagerData.pageViewWidth - 40f)
-                maxWidth(420f)
-                padding(20f)
-                borderRadius(16f)
-                backgroundColor(tokens.surface)
-            }
-            Text {
-                attr {
-                    text("归档“${title()}”？")
-                    fontSize(18f)
-                    fontWeightBold()
-                    color(tokens.primaryText)
-                    lines(2)
-                }
-            }
-            Text {
-                attr {
-                    text("归档只会把此会话从主列表隐藏，不是永久删除。日志和工作区记账仍会保留，可在“已归档会话”中查看完整历史。")
-                    marginTop(10f)
-                    fontSize(13f)
-                    lineHeight(20f)
-                    color(tokens.secondaryText)
-                }
-            }
-            vif({ error().isNotEmpty() }) {
-                Text {
-                    attr {
-                        text(error())
-                        marginTop(8f)
-                        fontSize(12f)
-                        lineHeight(18f)
-                        color(tokens.error.foreground)
-                    }
-                }
-            }
-            View {
-                attr {
-                    height(40f)
-                    marginTop(18f)
-                    flexDirectionRow()
-                    justifyContentFlexEnd()
-                }
-                Text {
-                    attr {
-                        text("取消")
-                        width(78f)
-                        height(38f)
-                        textAlignCenter()
-                        fontSize(14f)
-                        color(tokens.secondaryText)
-                    }
-                    event { click { if (!busy()) onClose() } }
-                }
-                Text {
-                    attr {
-                        text(if (busy()) "归档中..." else "确认归档")
-                        width(104f)
-                        height(38f)
-                        marginLeft(8f)
-                        textAlignCenter()
-                        fontSize(14f)
-                        color(if (busy()) tokens.disabled.foreground else tokens.error.foreground)
-                    }
-                    event { click { if (!busy()) onConfirm() } }
-                }
-            }
-        }
-    }
-}
-
-private fun ViewContainer<*, *>.DshArchivedSessionsModal(
-    sessions: () -> ObservableList<DshSession>,
-    activeId: () -> String,
-    onSelect: (String) -> Unit,
-    onManage: (String) -> Unit,
-    onClose: () -> Unit,
-) {
-    Modal(inWindow = true) {
-        attr {
-            absolutePositionAllZero()
-            allCenter()
-            paddingLeft(16f)
-            paddingRight(16f)
-            backgroundColor(tokens.scrim)
-        }
-        View {
-            attr {
-                width(pagerData.pageViewWidth - 32f)
-                maxWidth(520f)
-                height((pagerData.pageViewHeight - 80f).coerceAtMost(620f))
-                padding(18f)
-                borderRadius(16f)
-                backgroundColor(tokens.background)
-            }
-            View {
-                attr {
-                    height(44f)
-                    flexDirectionRow()
-                    alignItemsCenter()
-                }
-                Text {
-                    attr {
-                        text("已归档会话")
-                        flex(1f)
-                        fontSize(18f)
-                        fontWeightBold()
-                        color(tokens.primaryText)
-                    }
-                }
-                Text {
-                    attr {
-                        text("关闭")
-                        width(52f)
-                        height(36f)
-                        textAlignCenter()
-                        fontSize(13f)
-                        color(tokens.primary)
-                    }
-                    event { click { onClose() } }
-                }
-            }
-            Text {
-                attr {
-                    text("这些会话仅从主列表隐藏，历史记录仍完整保留。")
-                    marginBottom(12f)
-                    fontSize(12f)
-                    color(tokens.secondaryText)
-                }
-            }
-            vif({ sessions().isEmpty() }) {
-                Text {
-                    attr {
-                        text("暂无已归档会话")
-                        marginTop(24f)
-                        textAlignCenter()
-                        fontSize(14f)
-                        color(tokens.tertiaryText)
-                    }
-                }
-            }
-            vif({ sessions().isNotEmpty() }) {
-                List {
-                    attr { flex(1f) }
-                    vforLazy({ sessions() }) { session, _, _ ->
-                        View {
-                            attr { height(52f) }
-                            DshSessionDrawerRow(
-                                title = session.title,
-                                subtitle = session.cwd.ifEmpty { "Host" },
-                                active = activeId() == session.id,
-                                running = session.running,
-                                onManage = { onManage(session.id) },
-                                onSelect = { onSelect(session.id) },
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-private fun ViewContainer<*, *>.DshModelPicker(
-    options: () -> ObservableList<DshModelOption>,
-    busy: () -> Boolean,
-    error: () -> String,
-    onClose: () -> Unit,
-    onSelect: (DshModelOption) -> Unit,
-) {
-    Modal(inWindow = true) {
-        attr {
-            absolutePositionAllZero()
-            flexDirectionColumn()
-            justifyContentFlexEnd()
-            backgroundColor(tokens.scrim)
-        }
-        View {
-            attr { flex(1f) }
-            event { click { onClose() } }
-        }
-        View {
-            attr {
-                height((pagerData.pageViewHeight * 0.62f).coerceAtMost(540f))
-                flexDirectionColumn()
-                padding(18f)
-                borderRadius(20f)
-                backgroundColor(tokens.surface)
-            }
-            View {
-                attr { height(40f); flexDirectionRow(); alignItemsCenter() }
-                Text {
-                    attr {
-                        text("选择模型")
-                        fontSize(18f)
-                        fontWeightBold()
-                        color(tokens.primaryText)
-                    }
-                }
-                View { attr { flex(1f) } }
-                View {
-                    attr { size(36f, 36f); allCenter() }
-                    Image { attr { src(ImageUri.commonAssets("x.svg")); size(21f, 21f); tintColor(tokens.icon) } }
-                    event { click { onClose() } }
-                }
-            }
-            vif({ error().isNotEmpty() }) {
-                Text {
-                    attr {
-                        text(error())
-                        marginTop(6f)
-                        marginBottom(6f)
-                        fontSize(12f)
-                        color(tokens.error.foreground)
-                    }
-                }
-            }
-            vif({ busy() && options().isEmpty() }) {
-                Text {
-                    attr {
-                        text("正在加载模型...")
-                        marginTop(24f)
-                        fontSize(14f)
-                        color(tokens.secondaryText)
-                    }
-                }
-            }
-            Scroller {
-                attr { flex(1f); marginTop(8f) }
-                vfor({ options() }) { option ->
-                    View {
-                        attr {
-                            minHeight(58f)
-                            marginBottom(6f)
-                            flexDirectionRow()
-                            alignItemsCenter()
-                            padding(10f, 12f, 10f, 12f)
-                            borderRadius(10f)
-                            backgroundColor(if (option.selected) tokens.selectedSurface else tokens.surfaceVariant)
-                        }
-                        View {
-                            attr { flex(1f); flexDirectionColumn() }
-                            Text {
-                                attr {
-                                    text(option.name)
-                                    fontSize(14f)
-                                    fontWeightMedium()
-                                    color(tokens.primaryText)
-                                }
-                            }
-                            Text {
-                                attr {
-                                    text(option.providerName + if (option.description.isEmpty()) "" else " · ${option.description}")
-                                    marginTop(3f)
-                                    lines(1)
-                                    fontSize(11f)
-                                    color(tokens.tertiaryText)
-                                }
-                            }
-                        }
-                        if (option.selected) {
-                            Text { attr { text("✓"); fontSize(17f); color(tokens.primary) } }
-                        }
-                        event { click { if (!busy()) onSelect(option) } }
-                    }
-                }
-            }
-        }
-    }
-}
-
-private fun ViewContainer<*, *>.DshTopBar(
-    title: () -> String,
-    connection: () -> String,
-) {
-    View {
-        attr {
-            height(58f)
-            flexDirectionRow()
-            alignItemsCenter()
-            paddingLeft(12f)
-            paddingRight(14f)
-            backgroundColor(tokens.surface)
-            borderBottom(Border(1f, BorderStyle.SOLID, tokens.divider))
-        }
-        View {
-            attr { size(38f, 38f); allCenter() }
-            Image {
-                attr {
-                    src(ImageUri.commonAssets("menu.svg"))
-                    size(26f, 26f)
-                    tintColor(tokens.icon)
-                }
-            }
-        }
-        Text {
-            attr {
-                text(title())
-                marginLeft(10f)
-                flex(1f)
-                fontSize(17f)
-                fontWeightMedium()
-                color(tokens.primaryText)
-                lines(1)
-            }
-        }
-        View {
-            attr {
-                val ready = isConnectionReadyLabel(connection())
-                height(22f)
-                marginLeft(8f)
-                paddingLeft(8f)
-                paddingRight(8f)
-                borderRadius(11f)
-                backgroundColor(if (ready) tokens.success.background else tokens.disabled.background)
-                justifyContentCenter()
-                alignItemsCenter()
-            }
-            Text {
-                attr {
-                    val ready = isConnectionReadyLabel(connection())
-                    text(if (ready) "已连接" else topBarConnectingText(connection()))
-                    fontSize(11f)
-                    lines(1)
-                    color(if (ready) tokens.success.foreground else tokens.disabled.foreground)
-                }
-            }
-        }
-    }
-}
-
-private fun ViewContainer<*, *>.DshSessionRail(
-    sessions: () -> ObservableList<DshSession>,
-    activeId: () -> String,
-    compact: Boolean,
-    onSelect: (String) -> Unit,
-) {
-    View {
-        attr {
-            if (compact) {
-                height(92f)
-                flexDirectionRow()
-            } else {
-                width(236f)
-                flexDirectionColumn()
-            }
-            backgroundColor(tokens.surfaceVariant)
-            padding(14f)
-        }
-        Text {
-            attr {
-                text("会话")
-                fontSize(13f)
-                color(tokens.secondaryText)
-                marginBottom(9f)
-            }
-        }
-        if (compact) {
-            Scroller {
-                attr {
-                    flex(1f)
-                    flexDirectionRow()
-                }
-                vfor({ sessions() }) { session ->
-                    DshSessionButton(session, activeId() == session.id, onSelect)
-                }
-            }
-        } else {
-            Scroller {
-                attr { flex(1f) }
-                vfor({ sessions() }) { session ->
-                    DshSessionButton(session, activeId() == session.id, onSelect)
-                }
-            }
-        }
-    }
-}
-
-private fun ViewContainer<*, *>.DshSessionButton(
-    session: DshSession,
-    active: Boolean,
-    onSelect: (String) -> Unit,
-) {
-    Button {
-        attr {
-            height(48f)
-            width(if (active) 220f else 220f)
-            marginBottom(4f)
-            borderRadius(7f)
-            backgroundColor(if (active) tokens.selectedSurface else Color.TRANSPARENT)
-            titleAttr {
-                text(session.title)
-                color(if (active) tokens.primary else tokens.primaryText)
-                fontSize(13f)
-            }
-        }
-        event { click { onSelect(session.id) } }
-    }
-}
-
-private fun ViewContainer<*, *>.DshSessionDetailsPanel(
-    title: () -> String,
-    cwd: () -> String,
-    modelLabel: () -> String,
-    agentPreset: () -> String,
-    running: () -> Boolean,
-    queueCount: () -> Int,
-    jobCount: () -> Int,
-    archived: () -> Boolean,
-    onRename: () -> Unit,
-    onArchive: () -> Unit,
-) {
-    View {
-        attr {
-            width(280f)
-            height(pagerData.pageViewHeight)
-            flexDirectionColumn()
-            padding(16f)
-            backgroundColor(tokens.background)
-            border(Border(1f, BorderStyle.SOLID, tokens.divider))
-        }
-        Text {
-            attr {
-                text("Session")
-                fontSize(12f)
-                color(tokens.secondaryText)
-            }
-        }
-        Text {
-            attr {
-                text(title())
-                marginTop(6f)
-                fontSize(17f)
-                fontWeightSemiBold()
-                color(tokens.primaryText)
-                lines(2)
-            }
-        }
-        View {
-            attr {
-                height(1f)
-                marginTop(14f)
-                backgroundColor(tokens.divider)
-            }
-        }
-        DshDetailRow("状态", if (running()) "运行中" else "空闲")
-        DshDetailRow("模型", modelLabel())
-        vif({ agentPreset().isNotEmpty() }) {
-            DshDetailRow("Agent Preset", agentPreset())
-        }
-        DshDetailRow("队列", "${queueCount()} 条")
-        DshDetailRow("后台任务", "${jobCount()} 个")
-        vif({ cwd().isNotEmpty() }) {
-            DshDetailRow("目录", cwd())
-        }
-        View { attr { flex(1f) } }
-        Text {
-            attr {
-                text("重命名会话")
-                height(40f)
-                textAlignCenter()
-                fontSize(13f)
-                color(tokens.primary)
-                backgroundColor(tokens.surfaceVariant)
-                borderRadius(8f)
-            }
-            event { click { onRename() } }
-        }
-        vif({ !archived() }) {
-            Text {
-                attr {
-                    text("归档会话")
-                    height(40f)
-                    marginTop(10f)
-                    textAlignCenter()
-                    fontSize(13f)
-                    color(tokens.error.foreground)
-                    backgroundColor(tokens.surfaceVariant)
-                    borderRadius(8f)
-                }
-                event { click { onArchive() } }
-            }
-        }
-    }
-}
-
-private fun ViewContainer<*, *>.DshDetailRow(
-    label: String,
-    value: String,
-) {
-    View {
-        attr {
-            minHeight(44f)
-            marginTop(10f)
-            flexDirectionColumn()
-            justifyContentCenter()
-        }
-        Text {
-            attr {
-                text(label)
-                fontSize(11f)
-                color(tokens.tertiaryText)
-            }
-        }
-        Text {
-            attr {
-                text(value)
-                marginTop(2f)
-                fontSize(13f)
-                color(tokens.primaryText)
-                lines(2)
-            }
-        }
-    }
-}
-
-private fun ViewContainer<*, *>.DshWorkspaceBrowserModal(
-    path: () -> String,
-    home: () -> String,
-    entries: () -> ObservableList<DshDirectoryEntry>,
-    busy: () -> Boolean,
-    error: () -> String,
-    newName: () -> String,
-    onDirectorySelect: (String) -> Unit,
-    onNewNameChange: (String) -> Unit,
-    onCreateDirectory: () -> Unit,
-    onAdopt: () -> Unit,
-    onClose: () -> Unit,
-) {
-    Modal(inWindow = true) {
-        attr {
-            absolutePositionAllZero()
-            allCenter()
-            paddingLeft(20f)
-            paddingRight(20f)
-            backgroundColor(tokens.scrim)
-        }
-        View {
-            attr {
-                width(pagerData.pageViewWidth - 40f)
-                maxWidth(560f)
-                maxHeight(pagerData.pageViewHeight - 80f)
-                flexDirectionColumn()
-                padding(18f)
-                borderRadius(16f)
-                backgroundColor(tokens.surface)
-            }
-            View {
-                attr { height(36f); flexDirectionRow(); alignItemsCenter() }
-                Text {
-                    attr {
-                        text(if (path().isEmpty()) home() else path())
-                        flex(1f)
-                        lines(1)
-                        fontSize(17f)
-                        fontWeightBold()
-                        color(tokens.primaryText)
-                    }
-                }
-                View { attr { size(32f, 32f); allCenter() }; Image { attr { src(ImageUri.commonAssets("x.svg")); size(20f, 20f); tintColor(tokens.icon) } }; DshHitButton { onClose() } }
-            }
-            Scroller {
-                attr {
-                    flex(1f)
-                    marginTop(12f)
-                    borderRadius(8f)
-                    backgroundColor(tokens.surfaceVariant)
-                }
-                vfor({ entries() }) { entry ->
-                    View {
-                        attr {
-                            height(42f)
-                            flexDirectionRow()
-                            alignItemsCenter()
-                            paddingLeft(10f)
-                            paddingRight(10f)
-                        }
-                        Text {
-                            attr {
-                                text(entry.name)
-                                flex(1f)
-                                lines(1)
-                                fontSize(14f)
-                                color(tokens.primaryText)
-                            }
-                        }
-                        event { click { if (!busy()) onDirectorySelect(entry.path) } }
-                    }
-                }
-            }
-            vif({ error().isNotEmpty() }) {
-                Text { attr { text(error()); marginTop(8f); fontSize(12f); color(tokens.error.foreground) } }
-            }
-            Input {
-                attr {
-                    height(38f)
-                    marginTop(10f)
-                    fontSize(14f)
-                    placeholder("新目录名称")
-                    placeholderColor(tokens.tertiaryText)
-                }
-                event { textDidChange { onNewNameChange(it.text) } }
-            }
-            View {
-                attr { height(42f); marginTop(12f); flexDirectionRow(); justifyContentFlexEnd() }
-                Text {
-                    attr {
-                        text(if (busy()) "处理中..." else "新建目录")
-                        width(88f)
-                        height(38f)
-                        textAlignCenter()
-                        fontSize(13f)
-                        color(tokens.secondaryText)
-                    }
-                    event { click { if (!busy()) onCreateDirectory() } }
-                }
-                Text {
-                    attr {
-                        text(if (busy()) "处理中..." else "使用此目录")
-                        width(112f)
-                        height(38f)
-                        marginLeft(8f)
-                        textAlignCenter()
-                        fontSize(13f)
-                        color(tokens.primary)
-                    }
-                    event { click { if (!busy()) onAdopt() } }
-                }
-            }
-        }
-    }
-}
-
-private fun ViewContainer<*, *>.DshTurnStatus(
-    visible: () -> Boolean,
-    reconnecting: () -> Boolean,
-    elapsedMs: () -> Long,
-    shimmerOn: () -> Boolean,
-) {
-    vif({ visible() }) {
-        View {
-            attr {
-                flexDirectionRow()
-                alignItemsCenter()
-                height(26f)
-                marginTop(4f)
-                marginBottom(8f)
-            }
-            Text {
-                attr {
-                    text(dshTurnStatusLabel(reconnecting()))
-                    fontSize(14f)
-                    fontWeightBold()
-                    color(if (shimmerOn()) tokens.primaryPressed else tokens.primary)
-                    animation(Animation.linear(1.8f), shimmerOn())
-                }
-            }
-            vif({ elapsedMs() >= TURN_STATUS_CLOCK_AFTER_MS }) {
-                Text {
-                    attr {
-                        text(dshFormatTurnDuration(elapsedMs()))
-                        fontSize(13f)
-                        color(tokens.tertiaryText)
-                        marginLeft(8f)
-                    }
-                }
-            }
-        }
-    }
-}
-
-private const val TURN_STATUS_CLOCK_AFTER_MS = 15_000L
-
-private fun ViewContainer<*, *>.DshConversation(
-    conversationIds: () -> ObservableList<String>,
-    activeConversationId: () -> String,
-    messagesForSession: (String) -> ObservableList<DshMessage>,
-    streaming: () -> Boolean,
-    streamingMessageId: () -> String,
-    streamingContent: () -> String,
-    scrollerRef: (String, ViewRef<ListView<*, *>>) -> Unit,
-    messageRef: (String, String, ViewRef<com.tencent.kuikly.core.views.DivView>) -> Unit,
-    draft: () -> String,
-    skills: () -> ObservableList<DshSkill>,
-    onPickSkill: (String) -> Unit,
-    keyboardHeight: () -> Float,
-    stopButtonVisible: () -> Boolean,
-    keyboardAnimation: () -> Animation,
-    inputRef: (com.tencent.kuikly.core.base.ViewRef<InputView>) -> Unit,
-    onInputFocusChange: (Boolean) -> Unit,
-    onDraftChange: (String) -> Unit,
-    onKeyboardHeightChange: (KeyboardParams) -> Unit,
-    onSend: () -> Unit,
-    onStop: () -> Unit,
-    onDismissKeyboard: () -> Unit,
-    modelLabel: () -> String,
-    attachmentMenuVisible: () -> Boolean,
-    voiceActive: () -> Boolean,
-    onOpenModels: () -> Unit,
-    onToggleAttachments: () -> Unit,
-    onToggleVoice: () -> Unit,
-    isWebTimeline: () -> Boolean,
-    isDisclosureExpanded: (String) -> Boolean,
-    onToggleDisclosure: (String) -> Unit,
-    isBodyDisclosureExpanded: (String) -> Boolean,
-    onToggleBodyDisclosure: (String) -> Unit,
-    isJsonNodeExpanded: (String, String) -> Boolean,
-    onToggleJsonNode: (String, String) -> Unit,
-    onCopyToolContent: (String) -> Unit,
-    attachmentDataUrl: (String) -> String?,
-    queueItems: () -> ObservableList<DshQueueItem>,
-    jobItems: () -> ObservableList<DshJobItem>,
-    goal: () -> DshGoalSnapshot?,
-    goalActionBusy: () -> Boolean,
-    goalActionError: () -> String,
-    onPauseGoal: () -> Unit,
-    onResumeGoal: () -> Unit,
-    onEditGoal: (String, (Boolean) -> Unit) -> Unit,
-    onClearGoal: () -> Unit,
-    jobsPanelExpanded: () -> Boolean,
-    jobsNow: () -> Long,
-    onToggleJobsPanel: () -> Unit,
-    queueExpanded: () -> Boolean,
-    queueEditingId: () -> String,
-    queueActionBusy: () -> Boolean,
-    queueEditingText: () -> String,
-    sessionRunning: () -> Boolean,
-    turnReconnecting: () -> Boolean,
-    turnElapsedMs: () -> Long,
-    turnShimmerOn: () -> Boolean,
-    onToggleQueue: () -> Unit,
-    onEditQueueItem: (String) -> Unit,
-    onQueueEditingTextChange: (String) -> Unit,
-    onSaveQueueItem: (String) -> Unit,
-    onCancelQueueItemEdit: () -> Unit,
-    onRemoveQueueItem: (String) -> Unit,
-    onSteerQueueItem: (String) -> Unit,
-    pendingApproval: () -> DshPendingApproval?,
-    pendingQuestion: () -> DshPendingQuestion?,
-    interactionBusy: () -> Boolean,
-    selectedQuestionOptions: () -> ObservableList<String>,
-    questionCustom: () -> String,
-    questionIndex: () -> Int,
-    questionError: () -> String,
-    onAnswerApproval: (String) -> Unit,
-    onToggleQuestionOption: (String) -> Unit,
-    onQuestionCustomChange: (String) -> Unit,
-    onQuestionNavigate: (Int) -> Unit,
-    onQuestionSkip: () -> Unit,
-    onSubmitQuestion: () -> Unit,
-    availableWidth: Float,
-) {
-    View {
-        attr {
-            flex(1f)
-            width(availableWidth)
-            flexDirectionColumn()
-            backgroundColor(tokens.surface)
-        }
-        View {
-            attr {
-                flex(1f)
-                flexDirectionColumn()
-                // Reduce the conversation viewport when the keyboard opens.
-                // The header stays outside this container and the composer
-                // naturally settles above the keyboard without translating
-                // the list outside its clipping bounds.
-                marginBottom(keyboardHeight())
-                animation(keyboardAnimation(), keyboardHeight())
-            }
-            View {
-                attr {
-                flex(1f)
-                width(availableWidth)
-                backgroundColor(tokens.surface)
-            }
-            vfor({ conversationIds() }) { sessionId ->
-                List {
-                    ref { scrollerRef(sessionId, it) }
-                    attr {
-                        absolutePositionAllZero()
-                        width(availableWidth)
-                        padding(16f, 18f, 20f, 18f)
-                        firstContentLoadMaxIndex(CHAT_INITIAL_RENDER_COUNT)
-                        preloadViewDistance(pagerData.pageViewHeight)
-                        // Keep cached conversation lists mounted so the first
-                        // switch only changes opacity and z-order instead of
-                        // creating a native ListView/Markdown tree on demand.
-                        visibility(true)
-                        opacity(if (activeConversationId() == sessionId) 1f else 0f)
-                        touchEnable(activeConversationId() == sessionId)
-                        zIndex(if (activeConversationId() == sessionId) 1 else 0)
-                    }
-                    event {
-                        click { onDismissKeyboard() }
-                        dragBegin { onDismissKeyboard() }
-                        register("touchDown", { onDismissKeyboard() })
-                    }
-                    // Kuikly: vfor/vforLazy 的直接子节点必须是普通 View，不能是 vif/vfor。
-                    vforLazy(
-                        { messagesForSession(sessionId) },
-                        maxLoadItem = CHAT_MAX_RENDERED_MESSAGES,
-                    ) { message, _, _ ->
-                        View {
-                            ref { messageRef(sessionId, message.id, it) }
-                            attr {
-                                width((availableWidth - 36f).coerceAtLeast(0f))
-                            }
-                            DshMessageRow(
-                                message,
-                                pageStreaming = {
-                                    streaming() &&
-                                        activeConversationId() == sessionId &&
-                                        streamingMessageId() == message.id
-                                },
-                                isWebTimeline = isWebTimeline(),
-                                isExpanded = { isDisclosureExpanded(message.id) },
-                                onToggle = {
-                                    onToggleDisclosure(message.id)
-                                },
-                                isBodyExpanded = { isBodyDisclosureExpanded(message.id) },
-                                onToggleBody = {
-                                    onToggleBodyDisclosure(message.id)
-                                },
-                                isJsonNodeExpanded = { isJsonNodeExpanded(message.id, it) },
-                                onToggleJsonNode = { onToggleJsonNode(message.id, it) },
-                                onCopyToolContent = { onCopyToolContent(it) },
-                                attachmentDataUrl = { attachmentDataUrl(it) },
-                                contentProvider = {
-                                    if (streamingMessageId() != message.id) {
-                                        message.content
-                                    } else if (streaming() && activeConversationId() == sessionId) {
-                                        streamingContent().ifEmpty { message.content }
-                                    } else {
-                                        message.content.ifEmpty { streamingContent() }
-                                    }
-                                },
-                            )
-                        }
-                    }
-                    View {
-                        attr {
-                            width((availableWidth - 36f).coerceAtLeast(0f))
-                        }
-                        DshTurnStatus(
-                            visible = {
-                                activeConversationId() == sessionId &&
-                                    (streaming() || stopButtonVisible() || sessionRunning())
-                            },
-                            reconnecting = turnReconnecting,
-                            elapsedMs = turnElapsedMs,
-                            shimmerOn = turnShimmerOn,
-                        )
-                    }
-                }
-            }
-        }
-        vif({ isWebTimeline() && queueItems().isNotEmpty() }) {
-            DshQueueDock {
-                attr {
-                    items = queueItems()
-                    expanded = queueExpanded()
-                    editingId = queueEditingId()
-                    actionBusy = queueActionBusy()
-                    editingText = queueEditingText()
-                    running = sessionRunning()
-                    onToggle = onToggleQueue
-                    onEdit = onEditQueueItem
-                    onEditingTextChange = onQueueEditingTextChange
-                    onSaveEdit = onSaveQueueItem
-                    onCancelEdit = onCancelQueueItemEdit
-                    onRemove = onRemoveQueueItem
-                    onSteer = onSteerQueueItem
-                }
-            }
-        }
-        vif({ isWebTimeline() && jobItems().isNotEmpty() }) {
-            DshJobsPanel {
-                attr {
-                    jobs = jobItems()
-                    expanded = jobsPanelExpanded()
-                    now = jobsNow()
-                    onToggle = onToggleJobsPanel
-                }
-            }
-        }
-        vif({ isWebTimeline() && goal() != null }) {
-            DshGoalBar {
-                attr {
-                    snapshot = goal()
-                    busy = goalActionBusy()
-                    error = goalActionError()
-                    onPause = onPauseGoal
-                    onResume = onResumeGoal
-                    onEdit = onEditGoal
-                    onClear = onClearGoal
-                }
-            }
-        }
-        vif({ isWebTimeline() && pendingApproval()?.sessionId == activeConversationId() }) {
-            DshApprovalPanel {
-                attr {
-                    approval = pendingApproval()
-                    busy = interactionBusy()
-                    onAnswer = onAnswerApproval
-                }
-            }
-        }
-        vif({
-            isWebTimeline() &&
-                pendingApproval() == null &&
-                pendingQuestion()?.sessionId == activeConversationId()
-        }) {
-            DshQuestionFlow {
-                attr {
-                    question = pendingQuestion()
-                    val options = ObservableList<DshPendingQuestionOption>()
-                    pendingQuestion()?.questions?.getOrNull(questionIndex())?.options?.let(options::addAll)
-                    this.options = options
-                    selected = selectedQuestionOptions()
-                    custom = questionCustom()
-                    index = questionIndex()
-                    error = questionError()
-                    busy = interactionBusy()
-                    onToggleOption = onToggleQuestionOption
-                    onCustomChange = onQuestionCustomChange
-                    onNavigate = onQuestionNavigate
-                    onSkip = onQuestionSkip
-                    onSubmit = onSubmitQuestion
-                }
-            }
-        }
-            View {
-                attr {
-                    height(COMPOSER_HEIGHT)
-                    width(availableWidth)
-                    flexDirectionColumn()
-                    padding(12f, 14f, 12f, 14f)
-                    backgroundColor(tokens.surfaceElevated)
-                    borderRadius(22f)
-                    border(Border(1f, BorderStyle.SOLID, tokens.divider))
-                }
-                vif({
-                    isWebTimeline() && draft().startsWith("/") &&
-                        visibleSkillList(skills(), draft().removePrefix("/")).isNotEmpty()
-                }) {
-                    View {
-                        attr {
-                            maxHeight(132f)
-                            marginBottom(6f)
-                            flexDirectionColumn()
-                            backgroundColor(tokens.surfaceVariant)
-                            borderRadius(8f)
-                            border(Border(1f, BorderStyle.SOLID, tokens.divider))
-                        }
-                        vfor({ visibleSkillList(skills(), draft().removePrefix("/")) }) { skill ->
-                            View {
-                                attr {
-                                    height(32f)
-                                    flexDirectionRow()
-                                    alignItemsCenter()
-                                    paddingLeft(8f)
-                                    paddingRight(8f)
-                                }
-                                event { click { onPickSkill(skill.name) } }
-                                Text {
-                                    attr {
-                                        text("/${skill.name}")
-                                        width(110f)
-                                        fontSize(13f)
-                                        fontWeightMedium()
-                                        color(tokens.success.foreground)
-                                    }
-                                }
-                                Text {
-                                    attr {
-                                        text(if (skill.modelInvocable) skill.description else "用户专用 · ${skill.description}")
-                                        flex(1f)
-                                        lines(1)
-                                        fontSize(11f)
-                                        color(tokens.secondaryText)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            Input {
-                ref { inputRef(it) }
-                attr {
-                    height(58f)
-                    backgroundColor(Color.TRANSPARENT)
-                    fontSize(15f)
-                    color(tokens.primaryText)
-                    placeholder(if (voiceActive()) "正在聆听..." else "请输入您的问题...")
-                    placeholderColor(tokens.tertiaryText)
-                    returnKeyTypeSend()
-                    editable(!voiceActive())
-                }
-                event {
-                    inputFocus { onInputFocusChange(true) }
-                    textDidChange { onDraftChange(it.text) }
-                    keyboardHeightChange { onKeyboardHeightChange(it) }
-                    inputBlur {
-                        onInputFocusChange(false)
-                        onKeyboardHeightChange(KeyboardParams(0f, 0.24f))
-                    }
-                    inputReturn { onSend() }
-                }
-            }
-
-            vif({ attachmentMenuVisible() }) {
-                View {
-                    attr {
-                        height(82f)
-                        marginBottom(8f)
-                        flexDirectionColumn()
-                        padding(8f)
-                        borderRadius(10f)
-                        backgroundColor(tokens.surfaceVariant)
-                    }
-                    View {
-                        attr {
-                            height(32f)
-                            flexDirectionRow()
-                            alignItemsCenter()
-                            paddingLeft(8f)
-                        }
-                        Text { attr { text("图片"); fontSize(14f); color(tokens.primaryText) } }
-                        View { attr { flex(1f) } }
-                        Text { attr { text("PNG / JPG / WebP / GIF"); fontSize(11f); color(tokens.tertiaryText) } }
-                    }
-                    View {
-                        attr {
-                            height(32f)
-                            flexDirectionRow()
-                            alignItemsCenter()
-                            paddingLeft(8f)
-                        }
-                        Text { attr { text("文件"); fontSize(14f); color(tokens.primaryText) } }
-                        View { attr { flex(1f) } }
-                        Text { attr { text("选择本地文件"); fontSize(11f); color(tokens.tertiaryText) } }
-                    }
-                }
-            }
-
-            View {
-                attr {
-                    height(48f)
-                    flexDirectionRow()
-                    alignItemsCenter()
-                }
-                View {
-                    attr {
-                        width(184f)
-                        height(40f)
-                        flexDirectionRow()
-                        alignItemsCenter()
-                        paddingLeft(12f)
-                        paddingRight(9f)
-                        borderRadius(20f)
-                        border(Border(1f, BorderStyle.SOLID, tokens.dividerStrong))
-                    }
-                    Text {
-                        attr {
-                            text(modelLabel())
-                            flex(1f)
-                            lines(1)
-                            fontSize(14f)
-                            color(tokens.primaryText)
-                        }
-                    }
-                    Image {
-                        attr {
-                            src(ImageUri.commonAssets("chevron-down.svg"))
-                            size(18f, 18f)
-                            tintColor(tokens.icon)
-                        }
-                    }
-                    DshHitButton(onOpenModels)
-                }
-                View { attr { flex(1f) } }
-                View {
-                    attr { size(40f, 40f); allCenter() }
-                    Image { attr { src(ImageUri.commonAssets("sliders.svg")); size(22f, 22f); tintColor(tokens.icon) } }
-                }
-                View {
-                    attr {
-                        size(48f, 48f)
-                        marginLeft(6f)
-                        borderRadius(24f)
-                        allCenter()
-                        backgroundColor(
-                            when {
-                                stopButtonVisible() -> tokens.error.foreground
-                                voiceActive() -> tokens.primaryPressed
-                                else -> tokens.primary
-                            },
-                        )
-                    }
-                    vif({ stopButtonVisible() }) {
-                        Image {
-                            attr {
-                                src(ImageUri.commonAssets("square.svg"))
-                                size(23f, 23f)
-                                tintColor(tokens.onPrimary)
-                            }
-                        }
-                    }
-                    velse {
-                        Image {
-                            attr {
-                                src(ImageUri.commonAssets(if (draft().isEmpty()) "mic.svg" else "send.svg"))
-                                size(23f, 23f)
-                                tintColor(tokens.onPrimary)
-                            }
-                        }
-                    }
-                    DshHitButton {
-                            when {
-                                stopButtonVisible() -> onStop()
-                                draft().isNotEmpty() -> onSend()
-                                else -> onToggleVoice()
-                            }
-                    }
-                }
-            }
-            }
-        }
-    }
-}
-
-private fun ViewContainer<*, *>.DshMessageRow(
-    message: DshMessage,
-    pageStreaming: () -> Boolean,
-    isWebTimeline: Boolean,
-    isExpanded: () -> Boolean,
-    onToggle: () -> Unit,
-    isBodyExpanded: () -> Boolean = { false },
-    onToggleBody: () -> Unit = {},
-    isJsonNodeExpanded: (String) -> Boolean = { false },
-    onToggleJsonNode: (String) -> Unit = {},
-    onCopyToolContent: (String) -> Unit = {},
-    attachmentDataUrl: (String) -> String? = { null },
-    contentProvider: (() -> String)? = null,
-) {
-    if (message.hidden) return
-    val isUser = message.role == DshMessageRole.USER
-    val isError = message.role == DshMessageRole.ERROR
-    val renderedContent = contentProvider?.invoke() ?: message.content
-    if (
-        message.role == DshMessageRole.ASSISTANT &&
-        !message.isReasoning &&
-        pageStreaming() &&
-        renderedContent.isEmpty()
-    ) {
-        return
-    }
-    if (isWebTimeline && message.isContextInjection) {
-        View {
-            attr {
-                width(pagerData.pageViewWidth - 36f)
-                marginBottom(12f)
-            }
-            DshDisclosureRow {
-                attr {
-                    title = "上下文注入"
-                    iconAsset = "context.svg"
-                    summary = message.toolName.orEmpty()
-                    body = if (message.contextCatalog.isNotEmpty()) {
-                        message.contextCatalog.joinToString("\n") { "${it.name}\n${it.description}" }
-                    } else if (message.contextSections.isNotEmpty()) {
-                        message.contextSections.joinToString("\n\n") {
-                            "${it.title}\n${boundedContextText(it.body)}"
-                        }
-                    } else if (message.contextRecalls.isNotEmpty()) {
-                        message.contextRecalls.joinToString("\n") {
-                            "${it.label} · 保留 ${it.retainedMessages} · 省略 ${it.omittedMessages}${if (it.truncated) " · 已截断" else ""}"
-                        } + "\n\n" + boundedContextText(message.contextBody)
-                    } else if (message.contextInstructions.isNotEmpty()) {
-                        message.contextInstructions.joinToString("\n") { "${it.path} · ${it.action}" } +
-                            "\n\n" + boundedContextText(message.contextBody)
-                    } else if (message.contextRelaySender.isNotEmpty()) {
-                        "来自 ${message.contextRelaySender}\n\n${boundedContextText(message.contextBody)}"
-                    } else {
-                        boundedContextText(message.contextBody)
-                    }
-                    open = isExpanded()
-                    expandable = message.contextCanExpand()
-                    this.onToggle = onToggle
-                    bodyExpanded = isBodyExpanded()
-                    this.onToggleBody = onToggleBody
-                    maxBodyLines = 8
-                }
-            }
-        }
-        return
-    }
-    if (isWebTimeline && message.attachmentId != null) {
-        val dataUrl = attachmentDataUrl(message.attachmentId)
-        View {
-            attr {
-                width((pagerData.pageViewWidth - 36f).coerceAtLeast(0f))
-                height(220f)
-                marginBottom(12f)
-                borderRadius(8f)
-                backgroundColor(tokens.surfaceVariant)
-                border(Border(1f, BorderStyle.SOLID, tokens.divider))
-                justifyContentCenter()
-                alignItemsCenter()
-            }
-            if (dataUrl != null) {
-                Image {
-                    attr {
-                        src(dataUrl)
-                        width((pagerData.pageViewWidth - 40f).coerceAtLeast(0f))
-                        height(216f)
-                        resizeCover()
-                    }
-                }
-            } else {
-                Text {
-                    attr {
-                        text("图片加载中")
-                        fontSize(12f)
-                        color(tokens.secondaryText)
-                    }
-                }
-            }
-        }
-        return
-    }
-    if (isWebTimeline && message.isReasoning) {
-        View {
-            attr {
-                width(pagerData.pageViewWidth - 36f)
-                marginBottom(12f)
-            }
-            DshDisclosureRow {
-                attr {
-                    title = "Think"
-                    iconAsset = "think.svg"
-                    summary = message.content.dshReasoningSummary(message.streaming)
-                    body = message.content
-                    open = isExpanded()
-                    expandable = message.content.isNotEmpty()
-                    this.onToggle = onToggle
-                    bodyExpanded = isBodyExpanded()
-                    this.onToggleBody = onToggleBody
-                    maxBodyLines = 8
-                }
-            }
-        }
-        return
-    }
-    if (isWebTimeline && message.remoteTool?.kind == DshRemoteToolKind.SKILL) {
-        val remoteTool = message.remoteTool
-        View {
-            attr {
-                width((pagerData.pageViewWidth - 36f).coerceAtLeast(0f))
-                marginBottom(12f)
-            }
-            DshDisclosureRow {
-                attr {
-                    title = "Skill"
-                    iconAsset = "tool-skill.svg"
-                    summary = remoteTool.summary
-                    errorSummary = message.toolError
-                    body = message.content
-                    open = isExpanded()
-                    expandable = message.content.isNotEmpty()
-                    this.onToggle = onToggle
-                    bodyExpanded = isBodyExpanded()
-                    this.onToggleBody = onToggleBody
-                    maxBodyLines = 8
-                    chrome = true
-                    running = message.toolRunning
-                }
-            }
-        }
-        return
-    }
-    if (isWebTimeline && message.role == DshMessageRole.TOOL) {
-        val remoteTool = message.remoteTool
-        val isRemoteSpecial = remoteTool?.kind == DshRemoteToolKind.ASK_QUESTION ||
-            remoteTool?.kind == DshRemoteToolKind.TODO
-        val rawBody = remoteTool?.output?.takeIf { it.isNotEmpty() }
-            ?: remoteTool?.body?.takeIf { it.isNotEmpty() }
-            ?: remoteTool?.input?.takeIf { it.isNotEmpty() }
-            ?: message.content
-        val toolBody = if (remoteTool?.kind == DshRemoteToolKind.ASK_QUESTION) {
-            dshAskReadableBody(remoteTool.input, rawBody).ifEmpty { "已回答" }
-        } else {
-            rawBody
-        }
-        val trimmedBody = toolBody.trimStart()
-        val isJson = !isRemoteSpecial &&
-            (trimmedBody.startsWith("{") || trimmedBody.startsWith("["))
-        val cardLabel = remoteTool?.title ?: when (message.toolCardType) {
-            DshToolCardType.TERMINAL -> "Bash"
-            DshToolCardType.READ -> "Read"
-            DshToolCardType.DIFF -> "Diff"
-            DshToolCardType.SEARCH -> "Search"
-            DshToolCardType.WEB -> "Web"
-            DshToolCardType.JSON -> "JSON"
-            DshToolCardType.GENERIC -> message.toolName ?: "工具"
-        }
-        val summary = remoteTool?.summary?.takeUnless { it.dshLooksLikeJson() }
-            ?: if (remoteTool?.kind == DshRemoteToolKind.ASK_QUESTION) "已完成" else
-                toolBody.lineSequence().firstOrNull().orEmpty().takeUnless { it.dshLooksLikeJson() }.orEmpty()
-        View {
-            attr {
-                width((pagerData.pageViewWidth - 36f).coerceAtLeast(0f))
-                marginBottom(12f)
-            }
-            DshDisclosureRow {
-                attr {
-                    title = if (cardLabel.dshLooksLikeJson()) (remoteTool?.toolName ?: "工具") else cardLabel
-                    iconAsset = remoteTool?.iconAsset() ?: message.toolCardType.iconAsset()
-                    this.summary = summary
-                    errorSummary = message.toolError
-                    body = if (isJson) "" else toolBody
-                    jsonContent = if (isJson) toolBody else ""
-                    open = isExpanded()
-                    expandable = true
-                    this.onToggle = onToggle
-                    bodyExpanded = isBodyExpanded()
-                    this.onToggleBody = onToggleBody
-                    maxBodyLines = 8
-                    this.isJsonNodeExpanded = isJsonNodeExpanded
-                    this.onToggleJsonNode = onToggleJsonNode
-                    chrome = true
-                    running = message.toolRunning
-                }
-            }
-        }
-        return
-    }
-        View {
-            attr {
-                flexDirectionColumn()
-                alignItems(if (isUser) FlexAlign.FLEX_END else FlexAlign.FLEX_START)
-                marginBottom(18f)
-        }
-        Text {
-            attr {
-                text(when (message.role) {
-                    DshMessageRole.USER -> "你"
-                    DshMessageRole.TOOL -> message.toolName ?: "工具"
-                    DshMessageRole.ERROR -> "错误"
-                    DshMessageRole.ASSISTANT -> "DeepSeek"
-                })
-                fontSize(11f)
-                color(if (isError) tokens.error.foreground else tokens.tertiaryText)
-                marginBottom(5f)
-            }
-        }
-        View {
-            attr {
-                if (!isUser && !isError) {
-                    width((pagerData.pageViewWidth - 36f).coerceAtMost(620f).coerceAtLeast(0f))
-                }
-                maxWidth(620f)
-                padding(if (isUser) 10f else 0f, if (isUser) 14f else 0f, if (isUser) 10f else 0f, if (isUser) 14f else 0f)
-                borderRadius(if (isUser) 18f else 0f)
-                backgroundColor(
-                    when {
-                        isUser -> tokens.userBubble
-                        isError -> tokens.error.background
-                        else -> Color.TRANSPARENT
-                    },
-                )
-            }
-            if (isUser || isError) {
-                Text {
-                    attr {
-                        text(message.content)
-                        lines(Int.MAX_VALUE)
-                        fontSize(15f)
-                        color(if (isUser) tokens.userBubbleText else tokens.error.foreground)
-                    }
-                }
-            } else {
-                View {
-                    attr {
-                        flexDirectionColumn()
-                    }
-                    DshMarkdown {
-                        attr {
-                            contentWidth = (pagerData.pageViewWidth - 36f).coerceAtLeast(0f)
-                            val raw = contentProvider?.invoke() ?: message.content
-                            val live = pageStreaming()
-                            content = raw
-                            liveContent = contentProvider
-                            streamingProvider = pageStreaming
-                            streaming = live
-                        }
-                    }
-                    vif({ pageStreaming() && (contentProvider?.invoke() ?: message.content).isNotEmpty() }) {
-                        Text {
-                            attr {
-                                text(DshStreamingMarkdown.CURSOR)
-                                fontSize(14f)
-                                color(tokens.primary)
-                                marginTop(2f)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-private fun ViewContainer<*, *>.DshHitButton(onClick: () -> Unit) {
-    View {
-        attr {
-            absolutePositionAllZero()
-            backgroundColor(Color.TRANSPARENT)
-        }
-        event { click { onClick() } }
-    }
-}
-
-private fun isConnectionReadyLabel(label: String): Boolean {
-    return label.startsWith("已连接") ||
-        label.endsWith("已连接") ||
-        label.endsWith("已就绪") ||
-        label == "连接成功"
-}
-
-private fun isReconnectLabel(label: String): Boolean {
-    return label == "远程连接重建中" ||
-        label == "扫码连接重建中" ||
-        label == "扫码连接重试中" ||
-        label == "本地 DSH 连接重建中"
-}
-
-private fun topBarConnectingText(label: String): String {
-    val value = label.trim()
-    if (value.isEmpty()) return "连接中"
-    return value
-}
-
-private const val COMPOSER_HEIGHT = 142f
-private const val CHAT_INITIAL_RENDER_COUNT = 48
-private const val CHAT_MAX_RENDERED_MESSAGES = 128
-private const val SESSION_CACHE_WARM_LIMIT = 7
-private const val SESSION_CACHE_WARM_INTERVAL_MS = 16
-private const val SESSION_CACHE_WARM_START_DELAY_MS = 600
-private const val CONVERSATION_PANEL_CACHE_LIMIT = 8
-private const val SCROLL_SETTLE_ATTEMPTS = 6
-private val SCROLL_SETTLE_DELAYS_MS = intArrayOf(0, 16, 32, 64, 120, 200)

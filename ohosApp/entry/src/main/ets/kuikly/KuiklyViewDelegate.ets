@@ -5,6 +5,9 @@ import {
 } from '@kuikly-open/render';
 import { KRMyView } from './components/KRMyView';
 import { KRBridgeModule } from './modules/KRBridgeModule';
+import { KRDshEngineModule } from './modules/KRDshEngineModule';
+import { KRDshRelayModule } from './modules/KRDshRelayModule';
+import { KRDshWebSocketModule } from './modules/KRDshWebSocketModule';
 import { KRMyModule } from './modules/KRMyModule';
 import { DshThemeModule } from './modules/DshThemeModule';
 
@@ -18,6 +21,9 @@ export class KuiklyViewDelegate extends IKuiklyViewDelegate {
   getCustomRenderModuleCreatorRegisterMap(): Map<string, KRRenderModuleExportCreator> {
     const map: Map<string, KRRenderModuleExportCreator> = new Map();
     map.set(KRBridgeModule.MODULE_NAME, () => new KRBridgeModule());
+    map.set(KRDshRelayModule.MODULE_NAME, () => new KRDshRelayModule());
+    map.set(KRDshWebSocketModule.MODULE_NAME, () => new KRDshWebSocketModule());
+    map.set(KRDshEngineModule.MODULE_NAME, () => new KRDshEngineModule());
     map.set(KRMyModule.MODULE_NAME, () => new KRMyModule());
     map.set(DshThemeModule.MODULE_NAME, () => new DshThemeModule());
     return map;

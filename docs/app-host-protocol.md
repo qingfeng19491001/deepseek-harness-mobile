@@ -1,6 +1,6 @@
 # App 与 Host 协议
 
-这份文档记录 **DSH App 实际调用的 Host 协议**，方便对照代码和官方 Harness API。权威实现在 `shared/src/commonMain/kotlin/com/example/dsh/dsh/DshHostProtocol.kt`。方法名与官方 `packages/host/apiproxy` 对齐，App **不自定 JSON-RPC 方法**。
+这份文档记录 **DSH App 实际调用的 Host 协议**，方便对照代码和官方 Harness API。权威实现在 `shared/src/commonMain/kotlin/com/example/dsh/dsh/DshHostProtocol.kt`。官方 Host 方法名与 `packages/host/apiproxy` / Typert Remote 对齐。配套管理能力走独立前缀 `/dsh-mobile/rpc`，见 [dsh-mobile-plugin-protocol.md](dsh-mobile-plugin-protocol.md)，不占用官方 `/api/{method}` 方法名。
 
 扫码 Relay 的配对、密封隧道不属于 Host 协议，见 [dsh-scan-remote](https://github.com/yukiykchen/dsh-scan-remote)。配对成功后，App 只对 **本机 loopback 上的 Host** 说话，信封与 SSH 相同。
 
@@ -119,10 +119,13 @@ Authorization: Bearer <token>   // token 非空时
 | `session.updateQueue` | `{ sessionId, itemId, action }` | 队列 `edit` / `remove` / `steer` |
 | `session.attachment` | `{ sessionId, attachmentId }` | 读历史图片：`attachment` + Base64 `data` |
 | `skill.list` | `{ sessionId }` | `/` 补全用的 skill 列表 |
+| `pluginInventory/list` | `{}` 或 Typert `{ args: {} }` | 只读插件清单；无配置、无失败原因 |
 | `agentPreset.list` | （已声明常量，UI 目前只展示会话上的 preset 名） | 预留 |
 | `goal.edit` / `pause` / `resume` / `clear` | `{ sessionId, ref: { id, revision }, objective? }` | Goal 条 |
 
 导出不是 RPC：`GET /api/session.export?sessionId=&includeDescendants=`。
+
+插件清单：先探测 `POST /dsh-mobile/rpc` 的 `dsh.mobile.capabilities`。装了 [`host-plugin/`](../host-plugin/README.md) 时再拉 `dsh.plugin.inventory` / `dsh.plugin.control`。否则回退官方 `pluginInventory/list`，UI 保持只读。协议见 [dsh-mobile-plugin-protocol.md](dsh-mobile-plugin-protocol.md)。
 
 队列 `action` 示例：
 
@@ -232,6 +235,6 @@ Authorization: Bearer <token>   // token 非空时
 
 - 发图：`session.attachment` 已能读历史图；输入区尚未把 `type: image` 放进 `session.prompt`
 - 通用文件 / PDF 上传：官方无此 RPC
-- 插件启停：`pluginInventory/list` 只读，App 未接
+- 插件安装 / 卸载：官方和配套管理插件都不提供；启停/重载见 `host-plugin/` 与 [dsh-mobile-plugin-protocol.md](dsh-mobile-plugin-protocol.md)
 - 永久删除会话：官方归档有，删除存储需扩 Host
 - `session.prompt` 的 `mode: "steer"`：队列里的 steer 走 `session.updateQueue`，不是改 prompt mode

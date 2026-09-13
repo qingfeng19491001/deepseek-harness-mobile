@@ -174,6 +174,19 @@ internal class DshRemoteRepository(
         callback: (JSONObject?, DshRpcError?) -> Unit,
     ) = delegate.moveWorkspaceBefore(workspaceId, beforeWorkspaceId, callback)
 
+    fun loadPluginInventory(onSuccess: (DshPluginSnapshot) -> Unit, onError: (String) -> Unit) =
+        delegate.loadPluginInventory(onSuccess, onError)
+
+    fun getPlugin(entryId: String, callback: (DshPluginEntry?, DshRpcError?) -> Unit) =
+        delegate.getPlugin(entryId, callback)
+
+    fun controlPlugin(
+        entryId: String,
+        action: String,
+        confirm: Boolean,
+        callback: (DshPluginEntry?, DshRpcError?) -> Unit,
+    ) = delegate.controlPlugin(entryId, action, confirm, callback)
+
     override fun loadCredentialSetup(onSuccess: (DshCredentialSetup) -> Unit, onError: (String) -> Unit) =
         delegate.loadCredentialSetup(onSuccess, onError)
 

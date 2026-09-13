@@ -6,25 +6,29 @@ import com.tencent.kuikly.core.base.ComposeEvent
 import com.tencent.kuikly.core.base.ComposeView
 import com.tencent.kuikly.core.base.ViewBuilder
 import com.tencent.kuikly.core.base.ViewContainer
+import com.tencent.kuikly.core.directives.vbind
+import com.tencent.kuikly.core.directives.vfor
 import com.tencent.kuikly.core.reactive.ReactiveObserver
 import com.tencent.kuikly.core.reactive.handler.*
+import com.tencent.kuikly.core.timer.setTimeout
 import com.tencent.kuikly.core.views.View
 import com.tencent.kuiklybase.KuiklyStreamingMarkdown
+import com.tencent.kuiklybase.config.FontWeight
 import com.tencent.kuiklybase.config.MarkdownColors
 import com.tencent.kuiklybase.config.MarkdownConfig
 import com.tencent.kuiklybase.config.MarkdownDimens
 import com.tencent.kuiklybase.config.MarkdownTypography
-import com.tencent.kuiklybase.config.FontWeight
 import com.tencent.kuiklybase.config.TextStyleConfig
 import com.tencent.kuiklybase.streaming.MarkdownBlock
 import com.tencent.kuiklybase.streaming.MarkdownStreamingState
-import com.tencent.kuikly.core.directives.vfor
-import com.tencent.kuikly.core.timer.setTimeout
 
-/** DSH theme wrapper around KuiklyMarkdown's DSL renderer. */
+/** DSH theme wrapper around KuiklyMarkdown's streaming renderer. */
 internal class DshMarkdownView : ComposeView<DshMarkdownAttr, ComposeEvent>() {
     private val streamingState = MarkdownStreamingState()
     private var blockList by observableList<MarkdownBlock>()
+    private var blockCount by observable(0)
+    private var treeEpoch by observable(0)
+    private var liveKey by observable("")
     private var lastContent = ""
     private var lastStreaming = false
     private var pendingContent = ""
@@ -48,18 +52,30 @@ internal class DshMarkdownView : ComposeView<DshMarkdownAttr, ComposeEvent>() {
                         width(ctx.attr.contentWidth)
                     }
                 }
-                vfor({ ctx.blockList }) { block ->
-                    View {
-                        attr {
-                            if (ctx.attr.contentWidth > 0f) {
-                                width(ctx.attr.contentWidth)
+                // vforLazy will not create later siblings of a nested vfor
+                // after the row is already built (paragraph stays, code fence
+                // never mounts). Remount when the block count changes so
+                // KuiklyStreamingMarkdown can paint every block, including
+                // the component's own codeFence.
+                vbind({ ctx.treeEpoch }) {
+                    vfor({ ctx.blockList }) { block ->
+                        View {
+                            attr {
+                                if (ctx.attr.contentWidth > 0f) {
+                                    width(ctx.attr.contentWidth)
+                                }
+                            }
+                            vbind({
+                                val live = block.blockIndex == ctx.blockCount - 1
+                                if (live) ctx.liveKey else block.id
+                            }) {
+                                KuiklyStreamingMarkdown(
+                                    state = ctx.streamingState,
+                                    block = block,
+                                    config = ctx.markdownConfig(),
+                                )
                             }
                         }
-                        KuiklyStreamingMarkdown(
-                            state = ctx.streamingState,
-                            block = block,
-                            config = ctx.markdownConfig(),
-                        )
                     }
                 }
             }
@@ -118,6 +134,7 @@ internal class DshMarkdownView : ComposeView<DshMarkdownAttr, ComposeEvent>() {
         val content = pendingContent
         val streaming = pendingStreaming
         if (content == lastContent && streaming == lastStreaming) return
+        val endingStream = lastStreaming && !streaming
         if (content.isEmpty() && lastContent.isNotEmpty()) {
             DshStreamLog.i(
                 "render.skip empty-wipe streaming=$streaming prevChars=${lastContent.length} prevBlocks=${blockList.size}",
@@ -125,20 +142,50 @@ internal class DshMarkdownView : ComposeView<DshMarkdownAttr, ComposeEvent>() {
             lastStreaming = streaming
             return
         }
-        if (streaming && !lastStreaming) streamingState.reset()
+        if (
+            lastContent.isNotEmpty() &&
+            content.length < lastContent.length &&
+            lastContent.startsWith(content)
+        ) {
+            DshStreamLog.i(
+                "render.skip shrink streaming=$streaming prevChars=${lastContent.length} nextChars=${content.length}",
+            )
+            lastStreaming = streaming
+            return
+        }
+        if (streaming && !lastStreaming) {
+            DshStreamLog.i("render.stream-start chars=${content.length}")
+            streamingState.reset()
+            blockList.clear()
+            blockCount = 0
+            liveKey = ""
+            treeEpoch += 1
+        }
         lastContent = content
         lastStreaming = streaming
-        val next = streamingState.renderStreaming(content, streaming, force = !streaming)
+        val input = if (content.isEmpty() && streaming) DshStreamingMarkdown.PLACEHOLDER else content
+        val toParse = if (streaming) DshStreamingMarkdown.closeOpenFence(input) else input
+        val next = streamingState.update(toParse, force = !streaming)
         if (next == null) {
             DshStreamLog.i("render.skip parser-null streaming=$streaming chars=${content.length}")
             return
         }
         val previousCount = blockList.size
-        DshStreamingMarkdown.applyBlocks(blockList, next, streaming)
-        val last = next.lastOrNull()
-        val lastKind = last?.let { DshStreamLog.blockKind(it.blockContent) } ?: "-"
+        blockList.diffUpdate(next) { old, new -> old.id == new.id }
+        val countChanged = blockCount != blockList.size
+        if (countChanged) {
+            blockCount = blockList.size
+        }
+        val newLiveKey = next.lastOrNull()?.id.orEmpty()
+        if (liveKey != newLiveKey) {
+            liveKey = newLiveKey
+        }
+        if (countChanged || endingStream) {
+            treeEpoch += 1
+        }
+        flexNode.markDirty()
         DshStreamLog.i(
-            "render.apply streaming=$streaming chars=${content.length} prevBlocks=$previousCount ${DshStreamLog.blocks(next)} lastKind=$lastKind live='${DshStreamLog.preview(content)}'",
+            "render.apply streaming=$streaming uiBlocks=$previousCount→${blockList.size} ${DshStreamLog.blocks(next)}",
         )
     }
 
