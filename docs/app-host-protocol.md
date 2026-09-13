@@ -100,6 +100,8 @@ Authorization: Bearer <token>   // token 非空时
 | `workspace.delete` | `{ workspaceId }` | 删除工作区 |
 | `workspace.insertBefore` | `{ workspaceId, beforeWorkspaceId? }` | 排序 |
 | `workspace.archiveSession` | `{ sessionId }` | 归档会话 |
+| `workspace.unarchiveSession` | `{ sessionId }` | 恢复归档（`dsh-scan-remote` 扩展；官方 Host 没有此方法） |
+| `workspace.deleteSession` | `{ sessionId }` | 永久删除（`dsh-scan-remote` 扩展；官方 Host 没有此方法） |
 | `host.listDirectory` | `{ path? }` | 选目录 |
 | `host.createDirectory` | `{ path, name }` | 建子目录 |
 
@@ -236,5 +238,5 @@ Authorization: Bearer <token>   // token 非空时
 - 发图：`session.attachment` 已能读历史图；输入区尚未把 `type: image` 放进 `session.prompt`
 - 通用文件 / PDF 上传：官方无此 RPC
 - 插件安装 / 卸载：官方和配套管理插件都不提供；启停/重载见 `host-plugin/` 与 [dsh-mobile-plugin-protocol.md](dsh-mobile-plugin-protocol.md)
-- 永久删除会话：官方归档有，删除存储需扩 Host
+- 永久删除会话：官方归档有，删除/恢复由 `dsh-scan-remote` 扩展 `workspace.deleteSession` / `workspace.unarchiveSession`；未装插件时 App 禁用入口
 - `session.prompt` 的 `mode: "steer"`：队列里的 steer 走 `session.updateQueue`，不是改 prompt mode

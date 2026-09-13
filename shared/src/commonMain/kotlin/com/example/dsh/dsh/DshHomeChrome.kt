@@ -292,6 +292,8 @@ internal fun ViewContainer<*, *>.DshSessionDrawer(
     onOpenPlugins: () -> Unit,
     onNewSession: () -> Unit,
     onOpenArchived: () -> Unit,
+    sort: () -> DshSessionSort,
+    onSort: (DshSessionSort) -> Unit,
     onManage: (String) -> Unit,
     onSelect: (String) -> Unit,
 ) {
@@ -420,13 +422,26 @@ internal fun ViewContainer<*, *>.DshSessionDrawer(
                 }
                 event { click { onOpenSettings() } }
             }
-            Text {
+            View {
                 attr {
-                    text("会话")
                     marginTop(20f)
                     marginBottom(8f)
-                    fontSize(12f)
-                    color(tokens.captionText)
+                    flexDirectionRow()
+                    alignItemsCenter()
+                }
+                Text {
+                    attr {
+                        text("会话")
+                        flex(1f)
+                        fontSize(12f)
+                        color(tokens.captionText)
+                    }
+                }
+                DshSessionSortChip("最近", selected = { sort() == DshSessionSort.RECENT }) {
+                    onSort(DshSessionSort.RECENT)
+                }
+                DshSessionSortChip("名称", selected = { sort() == DshSessionSort.TITLE }) {
+                    onSort(DshSessionSort.TITLE)
                 }
             }
             vif({ isWebTimeline() }) {
@@ -469,6 +484,7 @@ internal fun ViewContainer<*, *>.DshSessionDrawer(
                             active = activeId() == session.id,
                             running = session.running,
                             onSelect = { onSelect(session.id) },
+                            onLongPress = { onManage(session.id) },
                         )
                     }
                 }
@@ -495,8 +511,8 @@ internal fun ViewContainer<*, *>.DshSessionDrawer(
                                     subtitle = if (session.cwd.isEmpty()) group.title else session.cwd,
                                     active = activeId() == session.id,
                                     running = session.running,
-                                    onManage = { onManage(session.id) },
                                     onSelect = { onSelect(session.id) },
+                                    onLongPress = { onManage(session.id) },
                                 )
                             }
                         }
@@ -514,13 +530,39 @@ internal fun ViewContainer<*, *>.DshSessionDrawer(
     }
 }
 
+internal fun ViewContainer<*, *>.DshSessionSortChip(
+    title: String,
+    selected: () -> Boolean,
+    onClick: () -> Unit,
+) {
+    View {
+        attr {
+            height(24f)
+            marginLeft(6f)
+            paddingLeft(8f)
+            paddingRight(8f)
+            borderRadius(12f)
+            justifyContentCenter()
+            backgroundColor(if (selected()) tokens.selectedSurface else tokens.surfaceVariant)
+        }
+        Text {
+            attr {
+                text(title)
+                fontSize(11f)
+                color(if (selected()) tokens.primary else tokens.secondaryText)
+            }
+        }
+        event { click { onClick() } }
+    }
+}
+
 internal fun ViewContainer<*, *>.DshSessionDrawerRow(
     title: String,
     subtitle: String,
     active: Boolean,
     running: Boolean,
-    onManage: (() -> Unit)? = null,
     onSelect: () -> Unit,
+    onLongPress: (() -> Unit)? = null,
 ) {
     View {
         attr {
@@ -564,23 +606,13 @@ internal fun ViewContainer<*, *>.DshSessionDrawerRow(
                     color(tokens.tertiaryText)
                 }
             }
-            if (onManage != null) {
-                event { click { onSelect() } }
-            }
         }
-        if (onManage == null) {
-            event { click { onSelect() } }
-        } else {
-            Text {
-                attr {
-                    text("管理")
-                    width(42f)
-                    height(32f)
-                    textAlignCenter()
-                    fontSize(11f)
-                    color(tokens.primary)
+        event {
+            click { onSelect() }
+            if (onLongPress != null) {
+                longPress { params ->
+                    if (params.state == "start") onLongPress()
                 }
-                event { click { onManage() } }
             }
         }
     }
@@ -697,6 +729,9 @@ internal fun ViewContainer<*, *>.DshModelPicker(
 internal fun ViewContainer<*, *>.DshTopBar(
     title: () -> String,
     connection: () -> String,
+    archived: () -> Boolean = { false },
+    onOpenDrawer: () -> Unit,
+    onManage: (() -> Unit)? = null,
 ) {
     View {
         attr {
@@ -717,16 +752,33 @@ internal fun ViewContainer<*, *>.DshTopBar(
                     tintColor(tokens.icon)
                 }
             }
+            event { click { onOpenDrawer() } }
         }
-        Text {
+        View {
             attr {
-                text(title())
-                marginLeft(10f)
                 flex(1f)
-                fontSize(17f)
-                fontWeightMedium()
-                color(tokens.primaryText)
-                lines(1)
+                marginLeft(10f)
+                flexDirectionColumn()
+                justifyContentCenter()
+            }
+            Text {
+                attr {
+                    text(title())
+                    fontSize(17f)
+                    fontWeightMedium()
+                    color(tokens.primaryText)
+                    lines(1)
+                }
+            }
+            vif({ archived() }) {
+                Text {
+                    attr {
+                        text("已归档 · 仅查看历史")
+                        marginTop(1f)
+                        fontSize(10f)
+                        color(tokens.captionText)
+                    }
+                }
             }
         }
         View {
@@ -751,6 +803,24 @@ internal fun ViewContainer<*, *>.DshTopBar(
                 }
             }
         }
+        if (onManage != null) {
+            View {
+                attr {
+                    size(34f, 34f)
+                    marginLeft(4f)
+                    allCenter()
+                }
+                Text {
+                    attr {
+                        text("···")
+                        fontSize(18f)
+                        fontWeightBold()
+                        color(tokens.icon)
+                    }
+                }
+                event { click { onManage() } }
+            }
+        }
     }
 }
 
@@ -759,6 +829,7 @@ internal fun ViewContainer<*, *>.DshSessionRail(
     activeId: () -> String,
     compact: Boolean,
     onSelect: (String) -> Unit,
+    onManage: (String) -> Unit = {},
 ) {
     View {
         attr {
@@ -787,14 +858,14 @@ internal fun ViewContainer<*, *>.DshSessionRail(
                     flexDirectionRow()
                 }
                 vfor({ sessions() }) { session ->
-                    DshSessionButton(session, activeId() == session.id, onSelect)
+                    DshSessionButton(session, activeId() == session.id, onSelect, onManage)
                 }
             }
         } else {
             Scroller {
                 attr { flex(1f) }
                 vfor({ sessions() }) { session ->
-                    DshSessionButton(session, activeId() == session.id, onSelect)
+                    DshSessionButton(session, activeId() == session.id, onSelect, onManage)
                 }
             }
         }
@@ -805,6 +876,7 @@ internal fun ViewContainer<*, *>.DshSessionButton(
     session: DshSession,
     active: Boolean,
     onSelect: (String) -> Unit,
+    onManage: (String) -> Unit = {},
 ) {
     Button {
         attr {
@@ -819,7 +891,12 @@ internal fun ViewContainer<*, *>.DshSessionButton(
                 fontSize(13f)
             }
         }
-        event { click { onSelect(session.id) } }
+        event {
+            click { onSelect(session.id) }
+            longPress { params ->
+                if (params.state == "start") onManage(session.id)
+            }
+        }
     }
 }
 
@@ -832,8 +909,12 @@ internal fun ViewContainer<*, *>.DshSessionDetailsPanel(
     queueCount: () -> Int,
     jobCount: () -> Int,
     archived: () -> Boolean,
+    canUnarchive: () -> Boolean = { false },
+    canDelete: () -> Boolean = { false },
     onRename: () -> Unit,
     onArchive: () -> Unit,
+    onRestore: () -> Unit = {},
+    onDelete: () -> Unit = {},
 ) {
     View {
         attr {
@@ -906,6 +987,36 @@ internal fun ViewContainer<*, *>.DshSessionDetailsPanel(
                 event { click { onArchive() } }
             }
         }
+        vif({ archived() && canUnarchive() }) {
+            Text {
+                attr {
+                    text("恢复到主列表")
+                    height(40f)
+                    marginTop(10f)
+                    textAlignCenter()
+                    fontSize(13f)
+                    color(tokens.primary)
+                    backgroundColor(tokens.surfaceVariant)
+                    borderRadius(8f)
+                }
+                event { click { onRestore() } }
+            }
+        }
+        vif({ canDelete() }) {
+            Text {
+                attr {
+                    text(if (running()) "删除不可用（运行中）" else "永久删除")
+                    height(40f)
+                    marginTop(10f)
+                    textAlignCenter()
+                    fontSize(13f)
+                    color(if (running()) tokens.disabled.foreground else tokens.error.foreground)
+                    backgroundColor(tokens.surfaceVariant)
+                    borderRadius(8f)
+                }
+                event { click { if (!running()) onDelete() } }
+            }
+        }
     }
 }
 
@@ -942,8 +1053,14 @@ internal fun ViewContainer<*, *>.DshDetailRow(
 internal fun ViewContainer<*, *>.DshSessionManageModal(
     title: () -> String,
     archived: () -> Boolean,
+    remote: () -> Boolean,
+    canUnarchive: () -> Boolean,
+    canDelete: () -> Boolean,
+    running: () -> Boolean,
     onRename: () -> Unit,
     onArchive: () -> Unit,
+    onRestore: () -> Unit,
+    onDelete: () -> Unit,
     onClose: () -> Unit,
 ) {
     Modal(inWindow = true) {
@@ -954,56 +1071,69 @@ internal fun ViewContainer<*, *>.DshSessionManageModal(
             paddingRight(20f)
             backgroundColor(tokens.scrim)
         }
+        event { click { onClose() } }
         View {
             attr {
-                width(pagerData.pageViewWidth - 40f)
-                maxWidth(420f)
-                padding(20f)
-                borderRadius(16f)
-                backgroundColor(tokens.surface)
+                width(220f)
+                paddingTop(6f)
+                paddingBottom(6f)
+                borderRadius(14f)
+                backgroundColor(tokens.surfaceElevated)
             }
-            Text {
-                attr {
-                    text(title())
-                    fontSize(18f)
-                    fontWeightBold()
-                    color(tokens.primaryText)
-                    lines(2)
-                }
-            }
-            Text {
-                attr {
-                    text("重命名")
-                    height(42f)
-                    marginTop(18f)
-                    textAlignCenter()
-                    fontSize(14f)
-                    color(tokens.primary)
-                    backgroundColor(tokens.surfaceVariant)
-                    borderRadius(8f)
-                }
-                event { click { onRename() } }
-            }
-            vif({ !archived() }) {
+            event { click { } }
+            vif({ !remote() }) {
                 Text {
                     attr {
-                        text("归档")
-                        height(42f)
-                        marginTop(10f)
-                        textAlignCenter()
-                        fontSize(14f)
-                        color(tokens.error.foreground)
-                        backgroundColor(tokens.surfaceVariant)
-                        borderRadius(8f)
+                        text("需连接电脑上的 DSH 才能重命名、归档或删除会话。手机不会另存一套会话。")
+                        margin(16f)
+                        fontSize(13f)
+                        lineHeight(20f)
+                        color(tokens.secondaryText)
                     }
-                    event { click { onArchive() } }
+                }
+            }
+            vif({ remote() }) {
+                DshSessionMenuRow("重命名", tokens.primaryText, onRename)
+                vif({ !archived() }) {
+                    DshSessionMenuRow("归档", tokens.primaryText, onArchive)
+                }
+                vif({ archived() && canUnarchive() }) {
+                    DshSessionMenuRow("恢复", tokens.primaryText, onRestore)
+                }
+                vif({ !canUnarchive() || !canDelete() }) {
+                    Text {
+                        attr {
+                            text("恢复或永久删除需要电脑上已更新的 dsh-scan-remote 插件。")
+                            marginLeft(18f)
+                            marginRight(18f)
+                            marginTop(8f)
+                            marginBottom(8f)
+                            fontSize(12f)
+                            lineHeight(18f)
+                            color(tokens.tertiaryText)
+                        }
+                    }
+                }
+                vif({ canDelete() }) {
+                    View {
+                        attr {
+                            height(1f)
+                            marginTop(4f)
+                            marginBottom(4f)
+                            backgroundColor(tokens.divider)
+                        }
+                    }
+                    DshSessionMenuRow(
+                        title = if (running()) "删除（运行中不可用）" else "删除",
+                        color = if (running()) tokens.disabled.foreground else tokens.error.foreground,
+                        onClick = { if (!running()) onDelete() },
+                    )
                 }
             }
             Text {
                 attr {
                     text("取消")
                     height(40f)
-                    marginTop(12f)
                     textAlignCenter()
                     fontSize(14f)
                     color(tokens.secondaryText)
@@ -1011,6 +1141,29 @@ internal fun ViewContainer<*, *>.DshSessionManageModal(
                 event { click { onClose() } }
             }
         }
+    }
+}
+
+internal fun ViewContainer<*, *>.DshSessionMenuRow(
+    title: String,
+    color: Color,
+    onClick: () -> Unit,
+) {
+    View {
+        attr {
+            height(44f)
+            paddingLeft(18f)
+            paddingRight(18f)
+            justifyContentCenter()
+        }
+        Text {
+            attr {
+                text(title)
+                fontSize(16f)
+                color(color)
+            }
+        }
+        event { click { onClick() } }
     }
 }
 
@@ -1195,6 +1348,134 @@ internal fun ViewContainer<*, *>.DshSessionArchiveModal(
     }
 }
 
+internal fun ViewContainer<*, *>.DshSessionDeleteModal(
+    title: () -> String,
+    busy: () -> Boolean,
+    error: () -> String,
+    onConfirm: () -> Unit,
+    onClose: () -> Unit,
+) {
+    Modal(inWindow = true) {
+        attr {
+            absolutePositionAllZero()
+            allCenter()
+            paddingLeft(20f)
+            paddingRight(20f)
+            backgroundColor(tokens.scrim)
+        }
+        View {
+            attr {
+                width(pagerData.pageViewWidth - 40f)
+                maxWidth(420f)
+                padding(20f)
+                borderRadius(16f)
+                backgroundColor(tokens.surface)
+            }
+            Text {
+                attr {
+                    text("永久删除“${title()}”？")
+                    fontSize(18f)
+                    fontWeightBold()
+                    color(tokens.primaryText)
+                    lines(2)
+                }
+            }
+            Text {
+                attr {
+                    text("这和归档不同：删除会从电脑上的 DSH 清掉会话日志，无法恢复。归档只是从主列表隐藏。")
+                    marginTop(10f)
+                    fontSize(13f)
+                    lineHeight(20f)
+                    color(tokens.secondaryText)
+                }
+            }
+            vif({ error().isNotEmpty() }) {
+                Text {
+                    attr {
+                        text(error())
+                        marginTop(8f)
+                        fontSize(12f)
+                        lineHeight(18f)
+                        color(tokens.error.foreground)
+                    }
+                }
+            }
+            View {
+                attr {
+                    height(40f)
+                    marginTop(18f)
+                    flexDirectionRow()
+                    justifyContentFlexEnd()
+                }
+                Text {
+                    attr {
+                        text("取消")
+                        width(78f)
+                        height(38f)
+                        textAlignCenter()
+                        fontSize(14f)
+                        color(tokens.secondaryText)
+                    }
+                    event { click { if (!busy()) onClose() } }
+                }
+                Text {
+                    attr {
+                        text(if (busy()) "删除中..." else "永久删除")
+                        width(104f)
+                        height(38f)
+                        marginLeft(8f)
+                        textAlignCenter()
+                        fontSize(14f)
+                        color(if (busy()) tokens.disabled.foreground else tokens.error.foreground)
+                    }
+                    event { click { if (!busy()) onConfirm() } }
+                }
+            }
+        }
+    }
+}
+
+internal fun ViewContainer<*, *>.DshSessionUndoBar(
+    message: () -> String,
+    onUndo: () -> Unit,
+) {
+    View {
+        attr {
+            height(44f)
+            marginLeft(16f)
+            marginRight(16f)
+            marginBottom(12f)
+            paddingLeft(14f)
+            paddingRight(10f)
+            flexDirectionRow()
+            alignItemsCenter()
+            borderRadius(12f)
+            backgroundColor(tokens.surfaceElevated)
+        }
+        Text {
+            attr {
+                text(message())
+                flex(1f)
+                fontSize(13f)
+                color(tokens.primaryText)
+                lines(1)
+            }
+        }
+        Text {
+            attr {
+                text("撤销")
+                width(52f)
+                height(32f)
+                textAlignCenter()
+                fontSize(14f)
+                fontWeightMedium()
+                color(tokens.primary)
+            }
+            event { click { onUndo() } }
+        }
+    }
+}
+
 internal fun ViewContainer<*, *>.DshArchivedSessionsModal(
     sessions: () -> ObservableList<DshSession>,
     activeId: () -> String,
@@ -1276,8 +1557,8 @@ internal fun ViewContainer<*, *>.DshArchivedSessionsModal(
                                 subtitle = session.cwd.ifEmpty { "Host" },
                                 active = activeId() == session.id,
                                 running = session.running,
-                                onManage = { onManage(session.id) },
                                 onSelect = { onSelect(session.id) },
+                                onLongPress = { onManage(session.id) },
                             )
                         }
                     }

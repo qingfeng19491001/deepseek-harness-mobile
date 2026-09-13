@@ -133,6 +133,16 @@ internal class DshRemoteRepository(
         callback: (JSONObject?, DshRpcError?) -> Unit,
     ) = delegate.archiveSession(sessionId, callback)
 
+    fun unarchiveSession(
+        sessionId: String,
+        callback: (JSONObject?, DshRpcError?) -> Unit,
+    ) = delegate.unarchiveSession(sessionId, callback)
+
+    fun deleteSession(
+        sessionId: String,
+        callback: (JSONObject?, DshRpcError?) -> Unit,
+    ) = delegate.deleteSession(sessionId, callback)
+
     fun forkSession(
         sessionId: String,
         atSeq: Int?,

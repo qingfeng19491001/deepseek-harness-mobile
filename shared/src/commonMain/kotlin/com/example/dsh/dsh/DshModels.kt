@@ -173,6 +173,9 @@ internal class DshHostStore {
                 title = titleProjection ?: previous.title.takeUnless { it == "尚无标题" } ?: next.title,
                 blank = next.blank,
                 subscribedLastSeq = maxOf(previous.subscribedLastSeq, next.subscribedLastSeq),
+                updatedAt = maxOf(previous.updatedAt, next.updatedAt),
+                updatedLabel = maxOf(previous.updatedAt, next.updatedAt).takeIf { it > 0 }?.toString()
+                    ?: next.updatedLabel.ifEmpty { previous.updatedLabel },
             )
         }
     }
@@ -225,6 +228,27 @@ internal class DshHostStore {
 
     fun putPending(rpcId: String, raw: String) { pendingInteractions[rpcId] = raw }
     fun removePending(rpcId: String) { pendingInteractions.remove(rpcId) }
+
+    fun applySessionRemoved(sessionId: String) {
+        sessions.remove(sessionId)
+        sessionEvents.remove(sessionId)
+        sessionLastSeq.remove(sessionId)
+        queueSnapshots.remove(sessionId)
+        jobSnapshots.remove(sessionId)
+        projections.remove(sessionId)
+        if (archivedSessionIds.contains(sessionId)) {
+            archivedSessionIds = archivedSessionIds - sessionId
+        }
+    }
+
+    fun touchSessionActivity(sessionId: String, at: Long) {
+        if (at <= 0L) return
+        sessions[sessionId]?.let { current ->
+            if (current.updatedAt < at) {
+                sessions[sessionId] = current.copy(updatedAt = at, updatedLabel = at.toString())
+            }
+        }
+    }
 }
 
 internal enum class DshRemoteFailure {
@@ -259,6 +283,7 @@ internal data class DshSession(
     val origin: String? = null,
     val agentPreset: String? = null,
     val subscribedLastSeq: Int = -1,
+    val updatedAt: Long = 0L,
 )
 
 internal enum class DshMessageRole {
