@@ -79,6 +79,16 @@ class WebSocketConnection {
     });
   }
 
+  send(text: string): void {
+    if (this.closed || text.length === 0) {
+      return;
+    }
+    try {
+      this.socket?.send(text);
+    } catch (error) {
+    }
+  }
+
   close(): void {
     this.closed = true;
     try {
@@ -133,6 +143,11 @@ export class KRDshWebSocketModule extends KuiklyRenderBaseModule {
       );
       this.connections.set(connectionId, connection);
       connection.start();
+      return null;
+    }
+    if (method === 'send') {
+      const connectionId = jsonString(value, 'connectionId');
+      this.connections.get(connectionId)?.send(jsonString(value, 'data'));
       return null;
     }
     if (method === 'disconnect') {

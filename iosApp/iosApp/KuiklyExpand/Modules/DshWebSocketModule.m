@@ -11,6 +11,7 @@
 @property (atomic, assign) BOOL finished;
 - (instancetype)initWithURL:(NSURL *)url token:(NSString *)token callback:(KuiklyRenderCallback)callback onFinished:(dispatch_block_t)onFinished;
 - (void)start;
+- (void)send:(NSString *)text;
 - (void)close;
 @end
 
@@ -42,6 +43,16 @@
     self.session = [NSURLSession sessionWithConfiguration:configuration delegate:self delegateQueue:nil];
     self.webSocketTask = [self.session webSocketTaskWithRequest:request];
     [self.webSocketTask resume];
+}
+
+- (void)send:(NSString *)text {
+    if (self.closed || text.length == 0 || !self.webSocketTask) return;
+    NSURLSessionWebSocketMessage *message = [[NSURLSessionWebSocketMessage alloc] initWithString:text];
+    [self.webSocketTask sendMessage:message completionHandler:^(NSError *error) {
+        if (error) {
+            NSLog(@"DshWebSocket send failed: %@", error.localizedDescription);
+        }
+    }];
 }
 
 - (void)close {
@@ -137,6 +148,13 @@
         }];
     self.connections[connectionId] = connection;
     [connection start];
+}
+
+- (void)send:(NSDictionary *)args {
+    NSDictionary *params = [args[KR_PARAM_KEY] hr_stringToDictionary];
+    NSString *connectionId = params[@"connectionId"];
+    NSString *data = params[@"data"];
+    [self.connections[connectionId] send:data ?: @""];
 }
 
 - (void)disconnect:(NSDictionary *)args {

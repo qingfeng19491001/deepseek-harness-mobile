@@ -18,10 +18,11 @@ internal data class DshWebSocketEvent(
 )
 
 internal interface DshWebSocketHandle {
+    fun send(text: String)
     fun close()
 }
 
-/** Native WebSocket bridge for the Host's two downlink-only event routes. */
+/** Native WebSocket bridge for the Host remote.mux carrier. */
 internal class DshWebSocketModule : Module() {
     private var connectionSequence = 0
 
@@ -57,6 +58,20 @@ internal class DshWebSocketModule : Module() {
         )
         return object : DshWebSocketHandle {
             private var closed = false
+
+            override fun send(text: String) {
+                if (closed || text.isEmpty()) return
+                toNative(
+                    keepCallbackAlive = false,
+                    methodName = "send",
+                    param = JSONObject().apply {
+                        put("connectionId", connectionId)
+                        put("data", text)
+                    }.toString(),
+                    callback = null,
+                    syncCall = false,
+                )
+            }
 
             override fun close() {
                 if (closed) return

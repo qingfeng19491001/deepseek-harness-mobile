@@ -46,6 +46,10 @@ internal class KRDshWebSocketModule : KuiklyRenderBaseModule() {
                 connections.remove(value.optString("connectionId"))?.close()
                 null
             }
+            "send" -> {
+                connections[value.optString("connectionId")]?.send(value.optString("data"))
+                null
+            }
             else -> null
         }
     }
@@ -95,6 +99,10 @@ internal class KRDshWebSocketModule : KuiklyRenderBaseModule() {
                     finish()
                 }
             })
+        }
+
+        fun send(text: String) {
+            if (!closed && text.isNotEmpty()) socket?.send(text)
         }
 
         fun close() {
