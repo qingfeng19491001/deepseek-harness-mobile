@@ -730,8 +730,14 @@ internal fun ViewContainer<*, *>.DshTopBar(
     title: () -> String,
     connection: () -> String,
     archived: () -> Boolean = { false },
+    selectMode: () -> Boolean = { false },
+    selectedCount: () -> Int = { 0 },
+    allSelected: () -> Boolean = { false },
     onOpenDrawer: () -> Unit,
     onManage: (() -> Unit)? = null,
+    onOverflow: () -> Unit = {},
+    onCancelSelect: () -> Unit = {},
+    onToggleSelectAll: () -> Unit = {},
 ) {
     View {
         attr {
@@ -743,67 +749,102 @@ internal fun ViewContainer<*, *>.DshTopBar(
             backgroundColor(tokens.surface)
             borderBottom(Border(1f, BorderStyle.SOLID, tokens.divider))
         }
-        View {
-            attr { size(38f, 38f); allCenter() }
-            Image {
+        vif({ selectMode() }) {
+            Text {
                 attr {
-                    src(ImageUri.commonAssets("menu.svg"))
-                    size(26f, 26f)
-                    tintColor(tokens.icon)
+                    text("取消")
+                    width(52f)
+                    height(36f)
+                    textAlignCenter()
+                    fontSize(16f)
+                    color(tokens.primary)
                 }
-            }
-            event { click { onOpenDrawer() } }
-        }
-        View {
-            attr {
-                flex(1f)
-                marginLeft(10f)
-                flexDirectionColumn()
-                justifyContentCenter()
+                event { click { onCancelSelect() } }
             }
             Text {
                 attr {
-                    text(title())
+                    text(if (selectedCount() == 0) "选择消息" else "已选 ${selectedCount()} 条")
+                    flex(1f)
+                    textAlignCenter()
                     fontSize(17f)
                     fontWeightMedium()
                     color(tokens.primaryText)
                     lines(1)
                 }
             }
-            vif({ archived() }) {
+            Text {
+                attr {
+                    text(if (allSelected()) "全不选" else "全选")
+                    width(56f)
+                    height(36f)
+                    textAlignCenter()
+                    fontSize(15f)
+                    color(tokens.primary)
+                }
+                event { click { onToggleSelectAll() } }
+            }
+        }
+        velse {
+            View {
+                attr { size(38f, 38f); allCenter() }
+                Image {
+                    attr {
+                        src(ImageUri.commonAssets("menu.svg"))
+                        size(26f, 26f)
+                        tintColor(tokens.icon)
+                    }
+                }
+                event { click { onOpenDrawer() } }
+            }
+            View {
+                attr {
+                    flex(1f)
+                    marginLeft(10f)
+                    flexDirectionColumn()
+                    justifyContentCenter()
+                }
                 Text {
                     attr {
-                        text("已归档 · 仅查看历史")
-                        marginTop(1f)
-                        fontSize(10f)
-                        color(tokens.captionText)
+                        text(title())
+                        fontSize(17f)
+                        fontWeightMedium()
+                        color(tokens.primaryText)
+                        lines(1)
+                    }
+                }
+                vif({ archived() }) {
+                    Text {
+                        attr {
+                            text("已归档 · 仅查看历史")
+                            marginTop(1f)
+                            fontSize(10f)
+                            color(tokens.captionText)
+                        }
                     }
                 }
             }
-        }
-        View {
-            attr {
-                val ready = isConnectionReadyLabel(connection())
-                height(22f)
-                marginLeft(8f)
-                paddingLeft(8f)
-                paddingRight(8f)
-                borderRadius(11f)
-                backgroundColor(if (ready) tokens.success.background else tokens.disabled.background)
-                justifyContentCenter()
-                alignItemsCenter()
-            }
-            Text {
+            View {
                 attr {
                     val ready = isConnectionReadyLabel(connection())
-                    text(if (ready) "已连接" else topBarConnectingText(connection()))
-                    fontSize(11f)
-                    lines(1)
-                    color(if (ready) tokens.success.foreground else tokens.disabled.foreground)
+                    height(22f)
+                    marginLeft(8f)
+                    paddingLeft(8f)
+                    paddingRight(8f)
+                    borderRadius(11f)
+                    backgroundColor(if (ready) tokens.success.background else tokens.disabled.background)
+                    justifyContentCenter()
+                    alignItemsCenter()
+                }
+                Text {
+                    attr {
+                        val ready = isConnectionReadyLabel(connection())
+                        text(if (ready) "已连接" else topBarConnectingText(connection()))
+                        fontSize(11f)
+                        lines(1)
+                        color(if (ready) tokens.success.foreground else tokens.disabled.foreground)
+                    }
                 }
             }
-        }
-        if (onManage != null) {
             View {
                 attr {
                     size(34f, 34f)
@@ -818,7 +859,7 @@ internal fun ViewContainer<*, *>.DshTopBar(
                         color(tokens.icon)
                     }
                 }
-                event { click { onManage() } }
+                event { click { onOverflow() } }
             }
         }
     }
@@ -915,6 +956,8 @@ internal fun ViewContainer<*, *>.DshSessionDetailsPanel(
     onArchive: () -> Unit,
     onRestore: () -> Unit = {},
     onDelete: () -> Unit = {},
+    onSelectMessages: () -> Unit = {},
+    onExportSession: () -> Unit = {},
 ) {
     View {
         attr {
@@ -960,6 +1003,31 @@ internal fun ViewContainer<*, *>.DshSessionDetailsPanel(
             DshDetailRow("目录", cwd())
         }
         View { attr { flex(1f) } }
+        Text {
+            attr {
+                text("选择消息")
+                height(40f)
+                textAlignCenter()
+                fontSize(13f)
+                color(tokens.primary)
+                backgroundColor(tokens.surface)
+                borderRadius(8f)
+            }
+            event { click { onSelectMessages() } }
+        }
+        Text {
+            attr {
+                text("导出为 HTML")
+                height(40f)
+                marginTop(10f)
+                textAlignCenter()
+                fontSize(13f)
+                color(tokens.primary)
+                backgroundColor(tokens.surface)
+                borderRadius(8f)
+            }
+            event { click { onExportSession() } }
+        }
         Text {
             attr {
                 text("重命名会话")
@@ -1061,6 +1129,8 @@ internal fun ViewContainer<*, *>.DshSessionManageModal(
     onArchive: () -> Unit,
     onRestore: () -> Unit,
     onDelete: () -> Unit,
+    onSelectMessages: () -> Unit = {},
+    onExportSession: () -> Unit = {},
     onClose: () -> Unit,
 ) {
     Modal(inWindow = true) {
@@ -1093,6 +1163,8 @@ internal fun ViewContainer<*, *>.DshSessionManageModal(
                 }
             }
             vif({ remote() }) {
+                DshSessionMenuRow("选择消息", tokens.primaryText, onSelectMessages)
+                DshSessionMenuRow("导出为 HTML", tokens.primaryText, onExportSession)
                 DshSessionMenuRow("重命名", tokens.primaryText, onRename)
                 vif({ !archived() }) {
                     DshSessionMenuRow("归档", tokens.primaryText, onArchive)

@@ -49,6 +49,10 @@ export class KRBridgeModule extends KuiklyRenderBaseModule {
         this.copyToPasteboard(params);
         break;
       }
+      case 'shareHtml': {
+        this.shareHtml(params);
+        break;
+      }
       case KRBridgeModule.TOAST: {
         this.toast(params);
         break;
@@ -123,6 +127,40 @@ export class KRBridgeModule extends KuiklyRenderBaseModule {
     const content = jsonString(moduleParams(params as Object), 'content');
     const data = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, content);
     pasteboard.getSystemPasteboard().setData(data);
+  }
+
+  private shareHtml(params: KRAny): void {
+    const rec = moduleParams(params as Object);
+    const html = jsonString(rec, 'html');
+    let filename = jsonString(rec, 'filename') || 'dsh-session.html';
+    const slash = filename.lastIndexOf('/');
+    const backslash = filename.lastIndexOf('\\');
+    const cut = Math.max(slash, backslash);
+    if (cut >= 0) {
+      filename = filename.substring(cut + 1);
+    }
+    filename = filename.replace(/\.\./g, '-');
+    if (!filename) {
+      filename = 'dsh-session.html';
+    }
+    try {
+      const context = DshOhosContext.require();
+      const path = `${context.cacheDir}/${filename}`;
+      const file = fs.openSync(path, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
+      fs.writeSync(file.fd, html);
+      fs.closeSync(file);
+      const data = pasteboard.createData('text/html', html);
+      pasteboard.getSystemPasteboard().setData(data);
+      promptAction.showToast({
+        message: '已复制 HTML，可粘贴到备忘录或浏览器后打印为 PDF',
+        duration: 2500,
+      });
+    } catch (error) {
+      dshError('shareHtml failed', error as Object);
+      const data = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, html);
+      pasteboard.getSystemPasteboard().setData(data);
+      promptAction.showToast({ message: '已复制 HTML', duration: 2000 });
+    }
   }
 
   private toast(params: KRAny): void {

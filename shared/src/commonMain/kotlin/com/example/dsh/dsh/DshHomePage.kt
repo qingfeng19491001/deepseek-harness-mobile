@@ -119,6 +119,12 @@ internal class DshHomePage : BasePager() {
     private var pluginPresetId by observable("")
     private var pluginActionBusy by observable(false)
     private var pluginActionError by observable("")
+    private var messageSelectMode by observable(false)
+    private val selectedMessageIds = mutableSetOf<String>()
+    private var selectedMessageRevision by observable(0)
+    private var selectedMessageCount by observable(0)
+    private var messageOverflowVisible by observable(false)
+    private var pendingEnterSelectSessionId = ""
     private var credentialSetupBusy by observable(false)
     private var credentialSetupError by observable("")
     private var credentialSetupTitle by observable("添加一个 API Key 开始使用")
@@ -287,11 +293,19 @@ internal class DshHomePage : BasePager() {
                         title = { ctx.sessions.firstOrNull { it.id == ctx.activeSessionId }?.title ?: "DeepSeek Harness" },
                         connection = { ctx.connectionLabel },
                         archived = { ctx.activeSessionArchived },
+                        selectMode = { ctx.messageSelectMode },
+                        selectedCount = { ctx.selectedMessageCount },
+                        allSelected = { ctx.allExportableSelected() },
                         onOpenDrawer = {
                             ctx.dismissKeyboard()
                             ctx.openSessionDrawer()
                         },
-                        onManage = { ctx.openSessionManage(ctx.activeSessionId) },
+                        onOverflow = {
+                            ctx.dismissKeyboard()
+                            ctx.messageOverflowVisible = !ctx.messageOverflowVisible
+                        },
+                        onCancelSelect = { ctx.exitMessageSelect() },
+                        onToggleSelectAll = { ctx.toggleSelectAllMessages() },
                     )
                 }
 
@@ -384,9 +398,17 @@ internal class DshHomePage : BasePager() {
                                     ctx.toggleWebJsonNode(messageId, nodeId)
                                 },
                                 onCopyToolContent = {
-                                    ctx.bridgeModule.copyToPasteboard(it)
-                                    ctx.bridgeModule.toast("已复制")
+                                    ctx.copyPlainText(it)
                                 },
+                                onCopyMessage = { ctx.copyMessage(it) },
+                                onEnterSelectMode = { ctx.enterMessageSelect(it) },
+                                selectMode = { ctx.messageSelectMode },
+                                selectedRevision = { ctx.selectedMessageRevision },
+                                isMessageSelected = { ctx.selectedMessageIds.contains(it) },
+                                onToggleMessageSelected = { ctx.toggleMessageSelected(it) },
+                                selectedCount = { ctx.selectedMessageCount },
+                                onCopySelected = { ctx.copySelectedMessages() },
+                                onExportSelected = { ctx.exportSelectedMessages() },
                                 attachmentDataUrl = { ctx.attachmentDataUrl(it) },
                                 queueItems = { ctx.queueItems },
                                 jobItems = { ctx.jobItems },
@@ -447,6 +469,8 @@ internal class DshHomePage : BasePager() {
                                     onArchive = { ctx.openSessionArchive(ctx.activeSessionId) },
                                     onRestore = { ctx.confirmSessionUnarchive(ctx.activeSessionId) },
                                     onDelete = { ctx.openSessionDelete(ctx.activeSessionId) },
+                                    onSelectMessages = { ctx.enterMessageSelect() },
+                                    onExportSession = { ctx.exportActiveSessionHtml() },
                                 )
                             }
                         }
@@ -501,9 +525,17 @@ internal class DshHomePage : BasePager() {
                                 ctx.toggleWebJsonNode(messageId, nodeId)
                             },
                             onCopyToolContent = {
-                                ctx.bridgeModule.copyToPasteboard(it)
-                                ctx.bridgeModule.toast("已复制")
+                                ctx.copyPlainText(it)
                             },
+                            onCopyMessage = { ctx.copyMessage(it) },
+                            onEnterSelectMode = { ctx.enterMessageSelect(it) },
+                            selectMode = { ctx.messageSelectMode },
+                            selectedRevision = { ctx.selectedMessageRevision },
+                            isMessageSelected = { ctx.selectedMessageIds.contains(it) },
+                            onToggleMessageSelected = { ctx.toggleMessageSelected(it) },
+                            selectedCount = { ctx.selectedMessageCount },
+                            onCopySelected = { ctx.copySelectedMessages() },
+                            onExportSelected = { ctx.exportSelectedMessages() },
                             attachmentDataUrl = { ctx.attachmentDataUrl(it) },
                             queueItems = { ctx.queueItems },
                             jobItems = { ctx.jobItems },
@@ -658,6 +690,12 @@ internal class DshHomePage : BasePager() {
                     caption = { ctx.imagePreviewCaption },
                     onClose = { ctx.closeImagePreview() },
                 )
+                DshMessageOverflowModal(
+                    visible = { ctx.messageOverflowVisible },
+                    onSelectMessages = { ctx.enterMessageSelect() },
+                    onExportSession = { ctx.exportActiveSessionHtml() },
+                    onClose = { ctx.messageOverflowVisible = false },
+                )
 
                 vif({ ctx.sessionManageTargetId.isNotEmpty() }) {
                     DshSessionManageModal(
@@ -696,6 +734,17 @@ internal class DshHomePage : BasePager() {
                             val id = ctx.sessionManageTargetId
                             ctx.sessionManageTargetId = ""
                             ctx.openSessionDelete(id)
+                        },
+                        onSelectMessages = {
+                            val id = ctx.sessionManageTargetId
+                            ctx.sessionManageTargetId = ""
+                            ctx.closeSessionDrawer()
+                            ctx.openMessageSelectForSession(id)
+                        },
+                        onExportSession = {
+                            val id = ctx.sessionManageTargetId.ifEmpty { ctx.activeSessionId }
+                            ctx.sessionManageTargetId = ""
+                            ctx.exportSessionHtml(id)
                         },
                         onClose = { ctx.sessionManageTargetId = "" },
                     )
@@ -2740,16 +2789,143 @@ internal class DshHomePage : BasePager() {
         }
     }
 
-    private fun exportActiveSession() {
-        val repository = repository as? DshRemoteRepository ?: return
-        val url = repository.sessionExportUrl(activeSessionId)
-        acquireModule<RouterModule>(RouterModule.MODULE_NAME).openPage(
-            "link_view",
-            JSONObject().apply {
-                put("pageName", "link_view")
-                put("url", url)
-            },
+    private fun copyPlainText(text: String) {
+        val value = text.trim()
+        if (value.isEmpty()) {
+            bridgeModule.toast("没有可复制的内容")
+            return
+        }
+        bridgeModule.copyToPasteboard(value)
+        bridgeModule.toast("已复制")
+    }
+
+    private fun displayedContentFor(message: DshMessage): String {
+        val liveRow = streaming && message.id == streamingAssistantId && activeSessionId.isNotEmpty()
+        return dshDisplayedAssistantContent(message.content, streamingAssistantContent, liveRow)
+    }
+
+    private fun copyMessage(message: DshMessage) {
+        copyPlainText(message.toReadableCopy(displayedContentFor(message)))
+    }
+
+    private fun enterMessageSelect(message: DshMessage? = null) {
+        messageOverflowVisible = false
+        sessionManageTargetId = ""
+        pendingEnterSelectSessionId = ""
+        closeSessionDrawer()
+        messageSelectMode = true
+        selectedMessageIds.clear()
+        if (message != null && message.isCopyExportable()) {
+            selectedMessageIds.add(message.id)
+        }
+        publishSelectedMessages()
+    }
+
+    private fun openMessageSelectForSession(sessionId: String) {
+        val id = sessionId.ifEmpty { activeSessionId }
+        if (id.isEmpty() || id == activeSessionId) {
+            enterMessageSelect()
+            return
+        }
+        pendingEnterSelectSessionId = id
+        selectSession(id)
+    }
+
+    private fun consumePendingEnterSelect(sessionId: String) {
+        if (pendingEnterSelectSessionId != sessionId) return
+        pendingEnterSelectSessionId = ""
+        enterMessageSelect()
+    }
+
+    private fun exitMessageSelect() {
+        messageSelectMode = false
+        selectedMessageIds.clear()
+        publishSelectedMessages()
+    }
+
+    private fun publishSelectedMessages() {
+        selectedMessageCount = selectedMessageIds.size
+        selectedMessageRevision += 1
+    }
+
+    private fun toggleMessageSelected(message: DshMessage) {
+        if (!message.isCopyExportable()) return
+        if (!messageSelectMode) {
+            enterMessageSelect(message)
+            return
+        }
+        if (!selectedMessageIds.add(message.id)) {
+            selectedMessageIds.remove(message.id)
+        }
+        publishSelectedMessages()
+    }
+
+    private fun exportableMessages(): List<DshMessage> =
+        sessionMessageState(activeSessionId).filter {
+            it.isCopyExportable() && it.copyEnabled(streaming && it.id == streamingAssistantId)
+        }
+
+    private fun allExportableSelected(): Boolean {
+        val exportable = exportableMessages()
+        return exportable.isNotEmpty() && exportable.all { selectedMessageIds.contains(it.id) }
+    }
+
+    private fun toggleSelectAllMessages() {
+        val exportable = exportableMessages()
+        if (allExportableSelected()) {
+            selectedMessageIds.clear()
+        } else {
+            selectedMessageIds.clear()
+            selectedMessageIds.addAll(exportable.map { it.id })
+        }
+        publishSelectedMessages()
+    }
+
+    private fun copySelectedMessages() {
+        copyPlainText(
+            dshSelectedMessagesReadable(
+                sessionMessageState(activeSessionId).toList(),
+                selectedMessageIds.toSet(),
+                displayedContent = { displayedContentFor(it) },
+                labeled = selectedMessageIds.size != 1,
+            ),
         )
+    }
+
+    private fun exportSelectedMessages() {
+        exportMessages(activeSessionId, selectedMessageIds.toSet())
+    }
+
+    private fun exportActiveSessionHtml() {
+        exportSessionHtml(activeSessionId)
+    }
+
+    private fun exportSessionHtml(sessionId: String) {
+        exportMessages(sessionId.ifEmpty { activeSessionId }, selectedIds = null)
+    }
+
+    private fun exportMessages(sessionId: String, selectedIds: Set<String>?) {
+        messageOverflowVisible = false
+        val sid = sessionId.ifEmpty { activeSessionId }
+        val list = sessionMessageState(sid, loadFromDisk = false).toList()
+        if (list.isEmpty() && !sessionMessageReady.contains(sid)) {
+            bridgeModule.toast("请先打开该会话再导出")
+            return
+        }
+        val blocks = dshSelectedExportBlocks(list, selectedIds) { displayedContentFor(it) }
+        if (blocks.isEmpty()) {
+            bridgeModule.toast("没有可导出的内容")
+            return
+        }
+        val title = sessions.firstOrNull { it.id == sid }?.title
+            ?: archivedSessions.firstOrNull { it.id == sid }?.title
+            ?: "会话导出"
+        bridgeModule.shareHtml(dshExportFileName(title), dshExportHtml(title, blocks))
+        if (messageSelectMode) exitMessageSelect()
+    }
+
+    private fun exportActiveSession() {
+        exportActiveSessionHtml()
     }
 
     private fun openWorkspaceBrowser() {
@@ -2958,8 +3134,13 @@ internal class DshHomePage : BasePager() {
         val startedAt = TimeSource.Monotonic.markNow()
         perfLog("switch.$traceId.request:$id", startedAt)
         dismissKeyboard()
+        if (pendingEnterSelectSessionId.isNotEmpty() && pendingEnterSelectSessionId != id) {
+            pendingEnterSelectSessionId = ""
+        }
+        if (messageSelectMode) exitMessageSelect()
         if (id == activeSessionId) {
             perfLog("switch.$traceId.same-session", startedAt)
+            consumePendingEnterSelect(id)
             return
         }
         if (!sessionMessageReady.contains(id)) {
@@ -3011,6 +3192,7 @@ internal class DshHomePage : BasePager() {
         closeImagePreview()
         attachmentSheetVisible = false
         applyActiveSessionChrome()
+        consumePendingEnterSelect(id)
         perfLog("switch.$traceId.end", startedAt)
     }
 

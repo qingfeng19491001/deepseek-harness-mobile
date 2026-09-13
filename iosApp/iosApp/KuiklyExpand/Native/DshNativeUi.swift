@@ -48,6 +48,30 @@ final class DshNativeUi: NSObject {
             }
         }
     }
+
+    @objc static func shareHtml(_ html: String, filename: String) {
+        DispatchQueue.main.async {
+            guard let presenter = topViewController() else { return }
+            var safeName = URL(fileURLWithPath: filename).lastPathComponent
+            if safeName.isEmpty || safeName == "/" {
+                safeName = "dsh-session.html"
+            }
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(safeName)
+            do {
+                try html.write(to: url, atomically: true, encoding: .utf8)
+            } catch {
+                toast("无法写出 HTML")
+                return
+            }
+            let sheet = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+            if let popover = sheet.popoverPresentationController {
+                popover.sourceView = presenter.view
+                popover.sourceRect = CGRect(x: presenter.view.bounds.midX, y: presenter.view.bounds.midY, width: 1, height: 1)
+                popover.permittedArrowDirections = []
+            }
+            presenter.present(sheet, animated: true)
+        }
+    }
 }
 
 private final class PaddingLabel: UILabel {

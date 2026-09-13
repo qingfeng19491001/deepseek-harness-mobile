@@ -162,6 +162,15 @@ internal fun ViewContainer<*, *>.DshConversation(
     isJsonNodeExpanded: (String, String) -> Boolean,
     onToggleJsonNode: (String, String) -> Unit,
     onCopyToolContent: (String) -> Unit,
+    onCopyMessage: (DshMessage) -> Unit,
+    onEnterSelectMode: (DshMessage) -> Unit,
+    selectMode: () -> Boolean,
+    selectedRevision: () -> Int,
+    isMessageSelected: (String) -> Boolean,
+    onToggleMessageSelected: (DshMessage) -> Unit,
+    selectedCount: () -> Int,
+    onCopySelected: () -> Unit,
+    onExportSelected: () -> Unit,
     attachmentDataUrl: (String) -> String?,
     queueItems: () -> ObservableList<DshQueueItem>,
     jobItems: () -> ObservableList<DshJobItem>,
@@ -291,6 +300,12 @@ internal fun ViewContainer<*, *>.DshConversation(
                                             isJsonNodeExpanded = { isJsonNodeExpanded(message.id, it) },
                                             onToggleJsonNode = { onToggleJsonNode(message.id, it) },
                                             onCopyToolContent = { onCopyToolContent(it) },
+                                            onCopyMessage = onCopyMessage,
+                                            onEnterSelectMode = onEnterSelectMode,
+                                            selectMode = selectMode,
+                                            selectedRevision = selectedRevision,
+                                            isSelected = { isMessageSelected(message.id) },
+                                            onToggleSelected = { onToggleMessageSelected(message) },
                                             attachmentDataUrl = { attachmentDataUrl(it) },
                                             onPreviewAttachment = onPreviewAttachment,
                                             contentProvider = {
@@ -412,6 +427,7 @@ internal fun ViewContainer<*, *>.DshConversation(
                 }
             }
         }
+        vif({ !selectMode() }) {
             View {
                 attr {
                     height(
@@ -592,6 +608,14 @@ internal fun ViewContainer<*, *>.DshConversation(
             }
             }
         }
+        vif({ selectMode() }) {
+            DshSelectActionBar(
+                selectedCount = selectedCount,
+                onCopy = onCopySelected,
+                onExport = onExportSelected,
+            )
+        }
+        }
     }
 }
 
@@ -606,6 +630,12 @@ internal fun ViewContainer<*, *>.DshMessageRow(
     isJsonNodeExpanded: (String) -> Boolean = { false },
     onToggleJsonNode: (String) -> Unit = {},
     onCopyToolContent: (String) -> Unit = {},
+    onCopyMessage: (DshMessage) -> Unit = {},
+    onEnterSelectMode: (DshMessage) -> Unit = {},
+    selectMode: () -> Boolean = { false },
+    selectedRevision: () -> Int = { 0 },
+    isSelected: () -> Boolean = { false },
+    onToggleSelected: () -> Unit = {},
     attachmentDataUrl: (String) -> String? = { null },
     onPreviewAttachment: (DshImageAttachmentRef) -> Unit = {},
     contentProvider: (() -> String)? = null,
@@ -622,6 +652,7 @@ internal fun ViewContainer<*, *>.DshMessageRow(
     ) {
         return
     }
+    val copyEnabled = { message.copyEnabled(pageStreaming()) }
     if (isWebTimeline && message.isContextInjection) {
         View {
             attr {
@@ -662,43 +693,58 @@ internal fun ViewContainer<*, *>.DshMessageRow(
         }
         return
     }
-    if (isWebTimeline && !isUser && message.attachmentId != null) {
-        val dataUrl = attachmentDataUrl(message.attachmentId)
-        View {
-            attr {
-                width((pagerData.pageViewWidth - 36f).coerceAtLeast(0f))
-                height(220f)
-                marginBottom(12f)
-                borderRadius(8f)
-                overflow(true)
-                backgroundColor(tokens.surfaceVariant)
-                border(Border(1f, BorderStyle.SOLID, tokens.divider))
-                justifyContentCenter()
-                alignItemsCenter()
-            }
-            if (dataUrl != null) {
-                Image {
-                    attr {
-                        src(dataUrl)
-                        width((pagerData.pageViewWidth - 40f).coerceAtLeast(0f))
-                        height(216f)
-                        resizeCover()
+    if (isWebTimeline && message.attachmentId != null) {
+        DshSelectableMessageShell(
+            message = message,
+            selectMode = selectMode,
+            selectedRevision = selectedRevision,
+            isSelected = isSelected,
+            onToggleSelected = onToggleSelected,
+        ) {
+            View {
+                attr {
+                    width((pagerData.pageViewWidth - 36f).coerceAtLeast(0f))
+                    height(220f)
+                    marginBottom(12f)
+                    borderRadius(8f)
+                    overflow(true)
+                    backgroundColor(tokens.surfaceVariant)
+                    border(Border(1f, BorderStyle.SOLID, tokens.divider))
+                    justifyContentCenter()
+                    alignItemsCenter()
+                }
+                val dataUrl = attachmentDataUrl(message.attachmentId)
+                if (dataUrl != null) {
+                    Image {
+                        attr {
+                            src(dataUrl)
+                            width((pagerData.pageViewWidth - 40f).coerceAtLeast(0f))
+                            height(216f)
+                            resizeCover()
+                        }
+                    }
+                } else {
+                    Text {
+                        attr {
+                            text("图片加载中")
+                            fontSize(12f)
+                            color(tokens.secondaryText)
+                        }
                     }
                 }
-            } else {
-                Text {
+                View {
                     attr {
-                        text("图片加载中")
-                        fontSize(12f)
-                        color(tokens.secondaryText)
+                        absolutePosition(top = 8f, right = 8f)
+                        zIndex(3)
                     }
+                    DshCopyChip(copyEnabled) { onCopyMessage(message) }
                 }
-            }
-            DshHitButton {
-                onPreviewAttachment(
-                    message.attachments.firstOrNull()
-                        ?: DshImageAttachmentRef(attachmentId = message.attachmentId.orEmpty()),
-                )
+                DshHitButton {
+                    onPreviewAttachment(
+                        message.attachments.firstOrNull()
+                            ?: DshImageAttachmentRef(attachmentId = message.attachmentId.orEmpty()),
+                    )
+                }
             }
         }
         return
@@ -728,26 +774,35 @@ internal fun ViewContainer<*, *>.DshMessageRow(
     }
     if (isWebTimeline && message.remoteTool?.kind == DshRemoteToolKind.SKILL) {
         val remoteTool = message.remoteTool
-        View {
-            attr {
-                width((pagerData.pageViewWidth - 36f).coerceAtLeast(0f))
-                marginBottom(12f)
-            }
-            DshDisclosureRow {
+        DshSelectableMessageShell(
+            message = message,
+            selectMode = selectMode,
+            selectedRevision = selectedRevision,
+            isSelected = isSelected,
+            onToggleSelected = onToggleSelected,
+        ) {
+            View {
                 attr {
-                    title = "Skill"
-                    iconAsset = "tool-skill.svg"
-                    summary = remoteTool.summary
-                    errorSummary = message.toolError
-                    body = message.content
-                    open = isExpanded()
-                    expandable = message.content.isNotEmpty()
-                    this.onToggle = onToggle
-                    bodyExpanded = isBodyExpanded()
-                    this.onToggleBody = onToggleBody
-                    maxBodyLines = 8
-                    chrome = true
-                    running = message.toolRunning
+                    width((pagerData.pageViewWidth - 36f).coerceAtLeast(0f))
+                    marginBottom(12f)
+                }
+                DshDisclosureRow {
+                    attr {
+                        title = "Skill"
+                        iconAsset = "tool-skill.svg"
+                        summary = remoteTool.summary
+                        errorSummary = message.toolError
+                        body = message.content
+                        open = isExpanded()
+                        expandable = message.content.isNotEmpty()
+                        this.onToggle = onToggle
+                        bodyExpanded = isBodyExpanded()
+                        this.onToggleBody = onToggleBody
+                        maxBodyLines = 8
+                        chrome = true
+                        running = message.toolRunning
+                        onCopy = { onCopyMessage(message) }
+                    }
                 }
             }
         }
@@ -781,103 +836,156 @@ internal fun ViewContainer<*, *>.DshMessageRow(
         val summary = remoteTool?.summary?.takeUnless { it.dshLooksLikeJson() }
             ?: if (remoteTool?.kind == DshRemoteToolKind.ASK_QUESTION) "已完成" else
                 toolBody.lineSequence().firstOrNull().orEmpty().takeUnless { it.dshLooksLikeJson() }.orEmpty()
-        View {
-            attr {
-                width((pagerData.pageViewWidth - 36f).coerceAtLeast(0f))
-                marginBottom(12f)
-            }
-            DshDisclosureRow {
+        DshSelectableMessageShell(
+            message = message,
+            selectMode = selectMode,
+            selectedRevision = selectedRevision,
+            isSelected = isSelected,
+            onToggleSelected = onToggleSelected,
+        ) {
+            View {
                 attr {
-                    title = if (cardLabel.dshLooksLikeJson()) (remoteTool?.toolName ?: "工具") else cardLabel
-                    iconAsset = remoteTool?.iconAsset() ?: message.toolCardType.iconAsset()
-                    this.summary = summary
-                    errorSummary = message.toolError
-                    body = if (isJson) "" else toolBody
-                    jsonContent = if (isJson) toolBody else ""
-                    open = isExpanded()
-                    expandable = true
-                    this.onToggle = onToggle
-                    bodyExpanded = isBodyExpanded()
-                    this.onToggleBody = onToggleBody
-                    maxBodyLines = 8
-                    this.isJsonNodeExpanded = isJsonNodeExpanded
-                    this.onToggleJsonNode = onToggleJsonNode
-                    chrome = true
-                    running = message.toolRunning
+                    width((pagerData.pageViewWidth - 36f).coerceAtLeast(0f))
+                    marginBottom(12f)
+                }
+                DshDisclosureRow {
+                    attr {
+                        title = if (cardLabel.dshLooksLikeJson()) (remoteTool?.toolName ?: "工具") else cardLabel
+                        iconAsset = remoteTool?.iconAsset() ?: message.toolCardType.iconAsset()
+                        this.summary = summary
+                        errorSummary = message.toolError
+                        body = if (isJson) "" else toolBody
+                        jsonContent = if (isJson) toolBody else ""
+                        open = isExpanded()
+                        expandable = true
+                        this.onToggle = onToggle
+                        bodyExpanded = isBodyExpanded()
+                        this.onToggleBody = onToggleBody
+                        maxBodyLines = 8
+                        this.isJsonNodeExpanded = isJsonNodeExpanded
+                        this.onToggleJsonNode = onToggleJsonNode
+                        chrome = true
+                        running = message.toolRunning
+                        onCopy = { onCopyMessage(message) }
+                    }
                 }
             }
         }
         return
     }
+    DshSelectableMessageShell(
+        message = message,
+        selectMode = selectMode,
+        selectedRevision = selectedRevision,
+        isSelected = isSelected,
+        onToggleSelected = onToggleSelected,
+    ) {
         View {
             attr {
                 flexDirectionColumn()
                 alignItems(if (isUser) FlexAlign.FLEX_END else FlexAlign.FLEX_START)
                 marginBottom(18f)
-        }
-        Text {
-            attr {
-                text(when (message.role) {
-                    DshMessageRole.USER -> "你"
-                    DshMessageRole.TOOL -> message.toolName ?: "工具"
-                    DshMessageRole.ERROR -> "错误"
-                    DshMessageRole.ASSISTANT -> "DeepSeek"
-                })
-                fontSize(11f)
-                color(if (isError) tokens.error.foreground else tokens.tertiaryText)
-                marginBottom(5f)
             }
-        }
-        View {
-            attr {
-                if (!isUser && !isError) {
-                    width((pagerData.pageViewWidth - 36f).coerceAtMost(620f).coerceAtLeast(0f))
+            View {
+                attr {
+                    flexDirectionRow()
+                    alignItemsCenter()
+                    marginBottom(5f)
                 }
-                maxWidth(620f)
-                padding(if (isUser) 10f else 0f, if (isUser) 14f else 0f, if (isUser) 10f else 0f, if (isUser) 14f else 0f)
-                borderRadius(if (isUser) 18f else 0f)
-                backgroundColor(
-                    when {
-                        isUser -> tokens.userBubble
-                        isError -> tokens.error.background
-                        else -> Color.TRANSPARENT
-                    },
-                )
+                if (isUser) {
+                    DshCopyChip(copyEnabled) { onCopyMessage(message) }
+                    View { attr { width(8f) } }
+                }
+                Text {
+                    attr {
+                        text(
+                            when (message.role) {
+                                DshMessageRole.USER -> "你"
+                                DshMessageRole.TOOL -> message.toolName ?: "工具"
+                                DshMessageRole.ERROR -> "错误"
+                                DshMessageRole.ASSISTANT -> "DeepSeek"
+                            },
+                        )
+                        fontSize(11f)
+                        color(if (isError) tokens.error.foreground else tokens.tertiaryText)
+                    }
+                }
+                if (!isUser && !isError) {
+                    View { attr { width(8f) } }
+                    DshCopyChip(copyEnabled) { onCopyMessage(message) }
+                }
             }
-            val imageGridWidth = (getPager().pageData.pageViewWidth - 64f).coerceAtMost(592f).coerceAtLeast(120f)
-            if (isUser || isError) {
-                if (message.content.isNotEmpty()) {
+            View {
+                attr {
+                    if (!isUser && !isError) {
+                        width((pagerData.pageViewWidth - 36f).coerceAtMost(620f).coerceAtLeast(0f))
+                    }
+                    maxWidth(620f)
+                    padding(if (isUser) 10f else 0f, if (isUser) 14f else 0f, if (isUser) 10f else 0f, if (isUser) 14f else 0f)
+                    borderRadius(if (isUser) 18f else 0f)
+                    backgroundColor(
+                        when {
+                            isUser -> tokens.userBubble
+                            isError -> tokens.error.background
+                            else -> Color.TRANSPARENT
+                        },
+                    )
+                }
+                if (isError) {
                     Text {
                         attr {
                             text(message.content)
                             lines(Int.MAX_VALUE)
                             fontSize(15f)
-                            color(if (isUser) tokens.userBubbleText else tokens.error.foreground)
+                            color(tokens.error.foreground)
                         }
                     }
-                }
-                if (isUser && message.attachments.isNotEmpty()) {
-                    DshMessageImageGrid(
-                        attachments = message.attachments,
-                        attachmentDataUrl = attachmentDataUrl,
-                        onPreview = onPreviewAttachment,
-                        maxWidth = imageGridWidth,
-                    )
-                }
-            } else {
-                View {
-                    attr {
-                        flexDirectionColumn()
-                    }
-                    DshMarkdown {
-                        attr {
-                            contentWidth = (pagerData.pageViewWidth - 36f).coerceAtLeast(0f)
-                            val raw = contentProvider?.invoke() ?: message.content
-                            val live = pageStreaming()
-                            content = raw
-                            liveContent = contentProvider
-                            streamingProvider = pageStreaming
-                            streaming = live
+                } else {
+                    DshSelectableBlock(
+                        enabled = copyEnabled,
+                        selectMode = selectMode,
+                        onCopySelection = { onCopyToolContent(it) },
+                        onCopyAll = { onCopyMessage(message) },
+                        onEnterSelect = { onEnterSelectMode(message) },
+                    ) {
+                        if (isUser) {
+                            if (message.content.isNotEmpty()) {
+                                Text {
+                                    attr {
+                                        text(message.content)
+                                        lines(Int.MAX_VALUE)
+                                        fontSize(15f)
+                                        color(tokens.userBubbleText)
+                                    }
+                                }
+                            }
+                            if (message.attachments.isNotEmpty()) {
+                                DshMessageImageGrid(
+                                    attachments = message.attachments,
+                                    attachmentDataUrl = attachmentDataUrl,
+                                    onPreview = onPreviewAttachment,
+                                    maxWidth = (getPager().pageData.pageViewWidth - 64f).coerceAtMost(592f).coerceAtLeast(120f),
+                                )
+                            }
+                        } else {
+                            View {
+                                attr {
+                                    flexDirectionColumn()
+                                    autoDarkEnable(false)
+                                }
+                                DshMarkdown {
+                                    attr {
+                                        contentWidth = (pagerData.pageViewWidth - 36f).coerceAtLeast(0f)
+                                        val raw = contentProvider?.invoke() ?: message.content
+                                        val live = pageStreaming()
+                                        content = raw
+                                        liveContent = contentProvider
+                                        streamingProvider = pageStreaming
+                                        streaming = live
+                                        onCopyCode = { onCopyToolContent(it) }
+                                    }
+                                }
+                            }
                         }
                     }
                     vif({ pageStreaming() && (contentProvider?.invoke() ?: message.content).isNotEmpty() }) {
@@ -892,6 +1000,44 @@ internal fun ViewContainer<*, *>.DshMessageRow(
                     }
                 }
             }
+        }
+    }
+}
+
+private fun ViewContainer<*, *>.DshSelectableMessageShell(
+    message: DshMessage,
+    selectMode: () -> Boolean,
+    selectedRevision: () -> Int,
+    isSelected: () -> Boolean,
+    onToggleSelected: () -> Unit,
+    content: ViewBuilder,
+) {
+    View {
+        attr {
+            flexDirectionRow()
+            alignItems(FlexAlign.FLEX_START)
+            width(pagerData.pageViewWidth - 36f)
+        }
+        vif({
+            selectedRevision()
+            selectMode() && message.isCopyExportable()
+        }) {
+            View {
+                attr {
+                    marginTop(6f)
+                }
+                DshSelectCheck(isSelected())
+            }
+        }
+        View {
+            attr { flex(1f) }
+            content.invoke(this)
+        }
+        vif({
+            selectedRevision()
+            selectMode() && message.isCopyExportable()
+        }) {
+            DshHitButton { onToggleSelected() }
         }
     }
 }

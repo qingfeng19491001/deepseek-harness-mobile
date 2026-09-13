@@ -1,6 +1,7 @@
 package com.example.dsh.dsh
 
 import com.example.dsh.theme.theme
+import com.example.dsh.theme.tokens
 import com.tencent.kuikly.core.base.ComposeAttr
 import com.tencent.kuikly.core.base.ComposeEvent
 import com.tencent.kuikly.core.base.ComposeView
@@ -8,9 +9,12 @@ import com.tencent.kuikly.core.base.ViewBuilder
 import com.tencent.kuikly.core.base.ViewContainer
 import com.tencent.kuikly.core.directives.vbind
 import com.tencent.kuikly.core.directives.vfor
+import com.tencent.kuikly.core.directives.vif
 import com.tencent.kuikly.core.reactive.ReactiveObserver
 import com.tencent.kuikly.core.reactive.handler.*
 import com.tencent.kuikly.core.timer.setTimeout
+import com.tencent.kuikly.core.views.SelectableOption
+import com.tencent.kuikly.core.views.Text
 import com.tencent.kuikly.core.views.View
 import com.tencent.kuiklybase.KuiklyStreamingMarkdown
 import com.tencent.kuiklybase.config.FontWeight
@@ -48,6 +52,7 @@ internal class DshMarkdownView : ComposeView<DshMarkdownAttr, ComposeEvent>() {
         return {
             View {
                 attr {
+                    autoDarkEnable(false)
                     if (ctx.attr.contentWidth > 0f) {
                         width(ctx.attr.contentWidth)
                     }
@@ -61,6 +66,7 @@ internal class DshMarkdownView : ComposeView<DshMarkdownAttr, ComposeEvent>() {
                     vfor({ ctx.blockList }) { block ->
                         View {
                             attr {
+                                autoDarkEnable(false)
                                 if (ctx.attr.contentWidth > 0f) {
                                     width(ctx.attr.contentWidth)
                                 }
@@ -69,11 +75,51 @@ internal class DshMarkdownView : ComposeView<DshMarkdownAttr, ComposeEvent>() {
                                 val live = block.blockIndex == ctx.blockCount - 1
                                 if (live) ctx.liveKey else block.id
                             }) {
-                                KuiklyStreamingMarkdown(
-                                    state = ctx.streamingState,
-                                    block = block,
-                                    config = ctx.markdownConfig(),
-                                )
+                                View {
+                                    attr {
+                                        autoDarkEnable(false)
+                                        if (ctx.attr.contentWidth > 0f) {
+                                            width(ctx.attr.contentWidth)
+                                        }
+                                    }
+                                    KuiklyStreamingMarkdown(
+                                        state = ctx.streamingState,
+                                        block = block,
+                                        config = ctx.markdownConfig(),
+                                    )
+                                    vif({
+                                        val streamingNow = ctx.attr.streamingProvider?.invoke() ?: ctx.attr.streaming
+                                        val live = streamingNow && block.blockIndex == ctx.blockCount - 1
+                                        val fence = dshParseCodeFence(block.blockContent)
+                                        fence != null && fence.body.isNotEmpty() && !live
+                                    }) {
+                                        View {
+                                            attr {
+                                                absolutePosition(top = 8f, right = 8f)
+                                                height(22f)
+                                                paddingLeft(8f)
+                                                paddingRight(8f)
+                                                borderRadius(11f)
+                                                allCenter()
+                                                zIndex(4)
+                                                selectable(SelectableOption.DISABLE)
+                                                backgroundColor(tokens.surfaceElevated)
+                                            }
+                                            Text {
+                                                attr {
+                                                    text("复制")
+                                                    fontSize(11f)
+                                                    fontWeightMedium()
+                                                    color(tokens.primary)
+                                                }
+                                            }
+                                            DshHitButton {
+                                                val body = dshParseCodeFence(block.blockContent)?.body.orEmpty()
+                                                if (body.isNotEmpty()) ctx.attr.onCopyCode(body)
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -86,25 +132,25 @@ internal class DshMarkdownView : ComposeView<DshMarkdownAttr, ComposeEvent>() {
         super.viewDidLoad()
         renderedThemeRevision = theme.revision
         ReactiveObserver.bindValueChange(this) {
-            val live = attr.liveContent
-            val content = live?.invoke() ?: attr.content
+            val live = attr.liveContent?.invoke().orEmpty()
+            val content = live.ifEmpty { attr.content }
             val streaming = attr.streamingProvider?.invoke() ?: attr.streaming
             ReactiveObserver.addLazyTaskUtilEndCollectDependency {
                 scheduleBlocksUpdate(content, streaming)
             }
         }
-        // markdownConfig() is read when a block item is created, not inside an attr block,
-        // so already-rendered blocks would keep the old palette. Rebuild them on theme change.
+        // markdownConfig() is captured when a block mounts. Remount on theme
+        // change so the new palette applies, but keep the parsed tree so a
+        // live reply is not wiped to an empty native markdown view.
         ReactiveObserver.bindValueChange(this) {
             val revision = theme.revision
             ReactiveObserver.addLazyTaskUtilEndCollectDependency {
                 if (revision != renderedThemeRevision) {
                     renderedThemeRevision = revision
                     cachedConfig = null
-                    if (blockList.isEmpty()) return@addLazyTaskUtilEndCollectDependency
-                    val current = blockList.toList()
-                    blockList.clear()
-                    blockList.addAll(current)
+                    if (blockList.isEmpty() && lastContent.isEmpty()) return@addLazyTaskUtilEndCollectDependency
+                    treeEpoch += 1
+                    flexNode.markDirty()
                 }
             }
         }
@@ -266,6 +312,7 @@ internal class DshMarkdownAttr : ComposeAttr() {
     var darkMode: Boolean by observable(false)
     var liveContent: (() -> String)? = null
     var streamingProvider: (() -> Boolean)? = null
+    var onCopyCode: (String) -> Unit by observable({})
 }
 
 internal fun ViewContainer<*, *>.DshMarkdown(init: DshMarkdownView.() -> Unit) {
