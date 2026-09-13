@@ -30,6 +30,13 @@ internal class BridgeModule : Module() {
         callNativeMethod("copyToPasteboard", methodArgs, null)
     }
 
+    fun shareHtml(filename: String, html: String) {
+        val methodArgs = JSONObject()
+        methodArgs.put("filename", filename)
+        methodArgs.put("html", html)
+        callNativeMethod("shareHtml", methodArgs, null)
+    }
+
     fun showAlert(
         title: String?,
         message: String?,

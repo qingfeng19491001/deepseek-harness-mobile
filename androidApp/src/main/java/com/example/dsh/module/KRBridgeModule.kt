@@ -19,8 +19,10 @@ import com.example.dsh.DshImagePicker
 import com.example.dsh.KRApplication
 import com.example.dsh.ssh.DshSshForegroundService
 import com.example.dsh.ssh.DshSshKeyStore
+import androidx.core.content.FileProvider
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 
@@ -54,6 +56,10 @@ class KRBridgeModule : KuiklyRenderBaseModule() {
 
             "copyToPasteboard" -> {
                 copyToPasteboard(params)
+            }
+
+            "shareHtml" -> {
+                shareHtml(params)
             }
 
             "toast" -> {
@@ -149,6 +155,36 @@ class KRBridgeModule : KuiklyRenderBaseModule() {
         val paramJSON = JSONObject(params)
         (context?.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager)?.also {
             it.setPrimaryClip(ClipData.newPlainText(MODULE_NAME, paramJSON.optString("content")))
+        }
+    }
+
+    private fun shareHtml(params: String?) {
+        if (params == null) return
+        val ctx = context ?: return
+        val paramJSON = JSONObject(params)
+        val html = paramJSON.optString("html")
+        val filename = File(paramJSON.optString("filename")).name
+            .replace("..", "-")
+            .ifBlank { "dsh-session.html" }
+        val file = File(ctx.cacheDir, filename)
+        file.writeText(html)
+        val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.export", file)
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/html"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_SUBJECT, filename.removeSuffix(".html"))
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            clipData = ClipData.newRawUri(filename, uri)
+        }
+        val chooser = Intent.createChooser(send, "导出 HTML")
+        chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        try {
+            (activity ?: ctx).startActivity(chooser)
+        } catch (error: ActivityNotFoundException) {
+            (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager)?.setPrimaryClip(
+                ClipData.newPlainText(MODULE_NAME, html),
+            )
+            Toast.makeText(KRApplication.application, "已复制 HTML", Toast.LENGTH_SHORT).show()
         }
     }
 

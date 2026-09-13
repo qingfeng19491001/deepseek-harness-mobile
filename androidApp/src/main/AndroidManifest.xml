@@ -52,5 +52,14 @@
             android:name=".relay.DshRelayForegroundService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.export"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/dsh_export_paths" />
+        </provider>
     </application>
 </manifest>

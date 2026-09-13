@@ -24,6 +24,13 @@
     pasteboard.string = content;
 }
 
+- (void)shareHtml:(NSDictionary *)args {
+    NSDictionary *params = [args[KR_PARAM_KEY] hr_stringToDictionary];
+    NSString *html = params[@"html"] ?: @"";
+    NSString *filename = params[@"filename"] ?: @"dsh-session.html";
+    [DshNativeUi shareHtml:html filename:filename];
+}
+
 - (void)log:(NSDictionary *)args {
     NSDictionary *params = [args[KR_PARAM_KEY] hr_stringToDictionary];
     NSString *content = params[@"content"];

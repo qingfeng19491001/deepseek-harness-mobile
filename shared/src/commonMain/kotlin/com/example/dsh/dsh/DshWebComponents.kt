@@ -111,6 +111,29 @@ internal class DshDisclosureRowView : ComposeView<DshDisclosureRowAttr, ComposeE
                     vif({ ctx.attr.summary.isEmpty() }) {
                         View { attr { flex(1f) } }
                     }
+                    vif({ ctx.attr.onCopy != null }) {
+                        View {
+                            attr {
+                                height(28f)
+                                paddingLeft(8f)
+                                paddingRight(4f)
+                                allCenter()
+                                zIndex(3)
+                                selectable(com.tencent.kuikly.core.views.SelectableOption.DISABLE)
+                            }
+                            Text {
+                                attr {
+                                    text("复制")
+                                    fontSize(12f)
+                                    fontWeightMedium()
+                                    color(tokens.primary)
+                                }
+                            }
+                            DshHitButton {
+                                ctx.attr.onCopy?.invoke()
+                            }
+                        }
+                    }
                     DshTapTarget {
                         if (ctx.attr.expandable) {
                             ctx.attr.open = !ctx.attr.open
@@ -182,6 +205,7 @@ internal class DshDisclosureRowAttr : ComposeAttr() {
     var onToggleJsonNode: (String) -> Unit by observable({})
     var chrome: Boolean by observable(false)
     var running: Boolean by observable(false)
+    var onCopy: (() -> Unit)? by observable(null)
 }
 
 /** Second-level disclosure for long terminal/read/diff bodies. */
