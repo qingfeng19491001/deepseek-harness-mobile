@@ -17,16 +17,16 @@ App 启动后先选连接方式，再进入聊天。**扫码连电脑的完整�
 
 ## 运行截图
 
-以下截图均在 Android 真机、已连接电脑 DSH 时拍摄（`main` 最新构建）：
+以下截图均在 Android 真机、已连接电脑 DSH 时拍摄（`main` 最新构建）。业务 UI 在 `commonMain`，Android / iOS / 鸿蒙共用同一套页面；原生能力（主题 chrome、WebSocket mux、复制 / 分享、选图）三端均有对应 Module。
 
-| 任务 | 验证点 | 截图 |
-| --- | --- | --- |
-| 任务一 · 主题模式 | 外观：跟随系统 / 浅色 / 深色 / 日出日落；代码主题；深色立即生效 | <img src="docs/screenshots/task1-theme.png" width="240" alt="任务一 主题模式" /> |
-| 任务二 · 复制与导出 | 消息「复制」、溢出菜单「选择消息 / 导出当前会话」 | <img src="docs/screenshots/task2-copy.png" width="240" alt="任务二 复制与导出" /> |
-| 任务三 · 图片附件 | 「添加图片」、张数与大小限制、相册 / 拍照入口 | <img src="docs/screenshots/task3-attach.png" width="240" alt="任务三 图片附件" /> |
-| 任务四 · 会话管理 | 重命名、归档、导出为 HTML | <img src="docs/screenshots/task4-session.png" width="240" alt="任务四 会话管理" /> |
-| 任务五 · 插件清单 | 官方只读清单、状态筛选（全部 / 运行中 / 已停用 / 失败 / 加载中） | <img src="docs/screenshots/task5-plugins.png" width="240" alt="任务五 插件清单" /> |
-| 任务六 · 日志中心 | 分类筛选、复制 / 导出 / 清空；清空不影响会话 | <img src="docs/screenshots/task6-logs.png" width="240" alt="任务六 日志中心" /> |
+| 任务 | 验证点 | 截图 | 视频 |
+| --- | --- | --- | --- |
+| 任务一 · 主题模式 | 外观：跟随系统 / 浅色 / 深色 / 日出日落；代码主题；深色立即生效 | <img src="docs/screenshots/task1-theme.png" width="240" alt="任务一 主题模式" /> | [task1-theme-mode.mp4](docs/task1-theme-mode.mp4) |
+| 任务二 · 复制与导出 | 消息「复制」、溢出菜单「选择消息 / 导出当前会话」 | <img src="docs/screenshots/task2-copy.png" width="240" alt="任务二 复制与导出" /> | [task2-copy-export.mp4](docs/task2-copy-export.mp4) |
+| 任务三 · 图片附件 | 「添加图片」、张数与大小限制、相册 / 拍照入口 | <img src="docs/screenshots/task3-attach.png" width="240" alt="任务三 图片附件" /> | [task3-image-upload.mp4](docs/task3-image-upload.mp4) |
+| 任务四 · 会话管理 | 重命名、归档、导出为 HTML | <img src="docs/screenshots/task4-session.png" width="240" alt="任务四 会话管理" /> | [task4-session-management.mp4](docs/task4-session-management.mp4) |
+| 任务五 · 插件清单 | 官方只读清单、状态筛选（全部 / 运行中 / 已停用 / 失败 / 加载中） | <img src="docs/screenshots/task5-plugins.png" width="240" alt="任务五 插件清单" /> | [task5-plugin-status.mp4](docs/task5-plugin-status.mp4) |
+| 任务六 · 日志中心 | 分类筛选、复制 / 导出 / 清空；清空不影响会话 | <img src="docs/screenshots/task6-logs.png" width="240" alt="任务六 日志中心" /> | [task6-log-center.mp4](docs/task6-log-center.mp4) |
 
 ## 项目定位
 
