@@ -15,6 +15,19 @@ App 启动后先选连接方式，再进入聊天。**扫码连电脑的完整�
 
 > 当前项目处于开发和验证阶段。请不要把它当作生产版本使用。
 
+## 视频演示
+
+以下演示均在 Android 真机上基于 `main` 分支最新构建录制：
+
+| 任务 | 演示内容 | 视频 |
+| --- | --- | --- |
+| 任务一 · 主题模式 | 浅色 / 深色 / 跟随系统切换、重启持久化、启动无白屏 | [task1-theme-mode.mp4](docs/task1-theme-mode.mp4) |
+| 任务二 · 复制能力 | 代码块一键复制（仅正文）、消息选择复制 | [task2-message-copy.mp4](docs/task2-message-copy.mp4) |
+| 任务三 · 图片附件 | 相册选择、已压缩标识、预览与删除 | [task3-image-attachments.mp4](docs/task3-image-attachments.mp4) |
+| 任务四 · 会话管理 | 重命名、归档、已归档列表、恢复 | [task4-session-management.mp4](docs/task4-session-management.mp4) |
+| 任务五 · 插件清单 | 状态筛选、搜索、详情弹窗安全启停 | [task5-plugin-inventory.mp4](docs/task5-plugin-inventory.mp4) |
+| 任务六 · 日志中心 | 分类筛选、复制 / 导出、清空仅删本机日志不影响会话 | [task6-log-center.mp4](docs/task6-log-center.mp4) |
+
 ## 项目定位
 
 DeepSeek Harness 本身是一个插件化 Agent 运行时。本仓库提供 Android / iOS 宿主：
