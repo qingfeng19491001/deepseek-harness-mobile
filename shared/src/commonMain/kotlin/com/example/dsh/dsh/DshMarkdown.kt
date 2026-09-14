@@ -1,5 +1,6 @@
 package com.example.dsh.dsh
 
+import com.example.dsh.theme.DshChromePalette
 import com.example.dsh.theme.theme
 import com.example.dsh.theme.tokens
 import com.tencent.kuikly.core.base.ComposeAttr
@@ -238,23 +239,34 @@ internal class DshMarkdownView : ComposeView<DshMarkdownAttr, ComposeEvent>() {
     private fun markdownConfig(): MarkdownConfig {
         val snapshot = theme
         val streaming = attr.streaming
+        val pageDark = snapshot.isDark
         val cached = cachedConfig
-        if (cached != null && cachedConfigRevision == snapshot.revision && cachedConfigStreaming == streaming) {
+        if (
+            cached != null &&
+            cachedConfigRevision == snapshot.revision &&
+            cachedConfigStreaming == streaming
+        ) {
             return cached
         }
         val dark = snapshot.codeIsDark
         val c = snapshot.codeColors
-        val text = c.text
+        // 正文跟界面深浅；代码色只给 fence / 行内代码，避免独立代码主题把整段回复染成浅字浅底。
+        val text = if (pageDark) DshChromePalette.DARK_BAR_CONTENT else DshChromePalette.LIGHT_BAR_CONTENT
+        val quoteText = if (pageDark) 0xFFB7BBC2 else 0xFF61666D
+        val divider = if (pageDark) 0xFF45474B else 0xFFE5E5E5
+        val tableBackground = if (pageDark) 0xFF202124 else 0xFFFAFAFA
+        val quoteBar = if (pageDark) 0xFF858990 else 0xFFA2A4A8
+        val quoteBackground = if (pageDark) 0xFF242528 else 0xFFF5F6F7
         val formula = c.formulaText
         val config = MarkdownConfig(
             colors = MarkdownColors(
                 text = text,
                 codeBackground = c.formulaBackground,
                 inlineCodeBackground = c.inlineCodeBackground,
-                dividerColor = c.divider,
-                tableBackground = c.tableBackground,
-                blockQuoteBar = c.quoteBar,
-                blockQuoteBackground = c.quoteBackground,
+                dividerColor = divider,
+                tableBackground = tableBackground,
+                blockQuoteBar = quoteBar,
+                blockQuoteBackground = quoteBackground,
                 linkColor = c.link,
                 codeText = c.codeText,
             ),
@@ -269,7 +281,7 @@ internal class DshMarkdownView : ComposeView<DshMarkdownAttr, ComposeEvent>() {
                 h4 = TextStyleConfig(fontSize = 16f, fontWeight = FontWeight.SemiBold, color = text, lineHeight = 22f),
                 h5 = TextStyleConfig(fontSize = 15f, fontWeight = FontWeight.SemiBold, color = text, lineHeight = 21f),
                 h6 = TextStyleConfig(fontSize = 15f, fontWeight = FontWeight.SemiBold, color = text, lineHeight = 21f),
-                quote = TextStyleConfig(fontSize = 15f, color = c.quoteText, lineHeight = 22f),
+                quote = TextStyleConfig(fontSize = 15f, color = quoteText, lineHeight = 22f),
                 ordered = TextStyleConfig(fontSize = 15f, color = text, lineHeight = 23f),
                 bullet = TextStyleConfig(fontSize = 15f, color = text, lineHeight = 23f),
                 list = TextStyleConfig(fontSize = 15f, color = text, lineHeight = 23f),

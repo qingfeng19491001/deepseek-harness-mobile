@@ -107,13 +107,11 @@ internal fun ViewContainer<*, *>.DshPluginInventoryModal(
             }
             View {
                 attr { marginTop(10f); flexDirectionRow(); flexWrap(FlexWrap.WRAP); alignItemsCenter() }
-                DshPluginFilter.entries.forEach { filter ->
-                    DshPluginChip(
-                        label = filter.label,
-                        selected = { filterId() == filter.id },
-                        onClick = { onFilterChange(filter.id) },
-                    )
-                }
+                DshPluginChip(label = DshPluginFilter.ALL.label, selected = { filterId() == DshPluginFilter.ALL.id }, onClick = { onFilterChange(DshPluginFilter.ALL.id) })
+                DshPluginChip(label = DshPluginFilter.ACTIVE.label, selected = { filterId() == DshPluginFilter.ACTIVE.id }, onClick = { onFilterChange(DshPluginFilter.ACTIVE.id) })
+                DshPluginChip(label = DshPluginFilter.DISABLED.label, selected = { filterId() == DshPluginFilter.DISABLED.id }, onClick = { onFilterChange(DshPluginFilter.DISABLED.id) })
+                DshPluginChip(label = DshPluginFilter.FAILED.label, selected = { filterId() == DshPluginFilter.FAILED.id }, onClick = { onFilterChange(DshPluginFilter.FAILED.id) })
+                DshPluginChip(label = DshPluginFilter.TRANSITION.label, selected = { filterId() == DshPluginFilter.TRANSITION.id }, onClick = { onFilterChange(DshPluginFilter.TRANSITION.id) })
             }
             vif({ presets().isNotEmpty() }) {
                 View {
@@ -446,6 +444,7 @@ private fun ViewContainer<*, *>.DshPluginChip(label: String, selected: () -> Boo
         }
         Text { attr { text(label); fontSize(12f); color(if (selected()) tokens.primary else tokens.secondaryText) } }
         event { click { onClick() } }
+        DshHitButton { onClick() }
     }
 }
 

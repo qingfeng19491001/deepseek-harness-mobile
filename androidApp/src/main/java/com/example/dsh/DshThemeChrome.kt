@@ -8,6 +8,7 @@ import android.content.res.Configuration
 import android.graphics.drawable.ColorDrawable
 import android.os.Build
 import android.view.View
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.view.WindowInsetsControllerCompat
 
 /**
@@ -30,12 +31,29 @@ object DshThemeChrome {
         (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
             Configuration.UI_MODE_NIGHT_YES
 
-    /** 按用户偏好 + 系统状态解析当前应使用的深浅色。任何异常都回退为跟随系统。 */
-    fun resolveIsDark(context: Context): Boolean {
+    fun storedPreference(context: Context): DshThemePreference {
         val preference = runCatching {
             context.getSharedPreferences(SP_FILE, Context.MODE_PRIVATE).getString(PREF_KEY, null)
-        }.getOrNull()?.trim()?.lowercase()
-        val parsed = DshThemePreference.fromStorage(preference)
+        }.getOrNull()
+        return DshThemePreference.fromStorage(preference)
+    }
+
+    /**
+     * 让 Android 12+ 系统启动画面走 values-night，而不是只看系统深浅。
+     * 日出日落在首帧先跟随系统，进页后由 Kuikly 校正。
+     */
+    fun applyDefaultNightMode(context: Context) {
+        val mode = when (storedPreference(context)) {
+            DshThemePreference.LIGHT -> AppCompatDelegate.MODE_NIGHT_NO
+            DshThemePreference.DARK -> AppCompatDelegate.MODE_NIGHT_YES
+            DshThemePreference.SYSTEM, DshThemePreference.AUTO -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
+        }
+        AppCompatDelegate.setDefaultNightMode(mode)
+    }
+
+    /** 按用户偏好 + 系统状态解析当前应使用的深浅色。任何异常都回退为跟随系统。 */
+    fun resolveIsDark(context: Context): Boolean {
+        val parsed = storedPreference(context)
         return if (parsed == DshThemePreference.AUTO) {
             systemIsDark(context)
         } else {
@@ -48,11 +66,18 @@ object DshThemeChrome {
         val window = activity.window ?: return
         val bg = backgroundColor(isDark)
         window.setBackgroundDrawable(ColorDrawable(bg))
+        window.statusBarColor = bg
+        window.navigationBarColor = bg
         containers.forEach { it?.setBackgroundColor(bg) }
 
+        val decor = window.decorView
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            decor.isForceDarkAllowed = false
+            window.isStatusBarContrastEnforced = false
+            window.isNavigationBarContrastEnforced = false
+        }
         // 深色主题用浅色图标，浅色主题用深色图标。同时走 InsetsController 与 legacy flag，
         // 兼容 Android 11+ 与旧系统，且避免 OEM 在窗口重建后丢掉其中一种设置。
-        val decor = window.decorView
         WindowInsetsControllerCompat(window, decor).apply {
             isAppearanceLightStatusBars = !isDark
             isAppearanceLightNavigationBars = !isDark

@@ -10,6 +10,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.graphics.Color
 import android.os.Build
+import com.example.dsh.BuildConfig
 import android.util.Log
 import android.view.inputmethod.InputMethodManager
 import android.widget.Toast
@@ -60,6 +61,10 @@ class KRBridgeModule : KuiklyRenderBaseModule() {
 
             "shareHtml" -> {
                 shareHtml(params)
+            }
+
+            "getFeedbackMeta" -> {
+                getFeedbackMeta()
             }
 
             "toast" -> {
@@ -140,8 +145,9 @@ class KRBridgeModule : KuiklyRenderBaseModule() {
             return
         }
         val paramJSON = JSONObject(params)
+        val ctx = context ?: KRApplication.application
         Toast.makeText(
-            KRApplication.application,
+            ctx,
             paramJSON.optString("content"),
             Toast.LENGTH_SHORT
         ).show()
@@ -153,7 +159,8 @@ class KRBridgeModule : KuiklyRenderBaseModule() {
         }
 
         val paramJSON = JSONObject(params)
-        (context?.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager)?.also {
+        val ctx = context ?: KRApplication.application
+        (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager)?.also {
             it.setPrimaryClip(ClipData.newPlainText(MODULE_NAME, paramJSON.optString("content")))
         }
     }
@@ -227,6 +234,14 @@ class KRBridgeModule : KuiklyRenderBaseModule() {
 
     private fun currentTimestamp(params: String?): String {
         return (System.currentTimeMillis()).toString()
+    }
+
+    private fun getFeedbackMeta(): String {
+        return JSONObject().apply {
+            put("appVersion", BuildConfig.VERSION_NAME)
+            put("device", "${Build.MANUFACTURER} ${Build.MODEL}")
+            put("sdk", Build.VERSION.SDK_INT)
+        }.toString()
     }
 
     private fun dateFormatter(params: String?): String {

@@ -290,6 +290,7 @@ internal fun ViewContainer<*, *>.DshSessionDrawer(
     onOpenSettings: () -> Unit,
     onOpenAppearance: () -> Unit,
     onOpenPlugins: () -> Unit,
+    onOpenLogs: () -> Unit,
     onNewSession: () -> Unit,
     onOpenArchived: () -> Unit,
     sort: () -> DshSessionSort,
@@ -410,6 +411,29 @@ internal fun ViewContainer<*, *>.DshSessionDrawer(
                     borderRadius(9f)
                     backgroundColor(Color.TRANSPARENT)
                 }
+                Image { attr { src(ImageUri.commonAssets("log.svg")); size(20f, 20f); tintColor(tokens.icon) } }
+                Text {
+                    attr {
+                        text("日志")
+                        marginLeft(10f)
+                        fontSize(14f)
+                        fontWeightMedium()
+                        color(tokens.secondaryText)
+                    }
+                }
+                event { click { onOpenLogs() } }
+            }
+            View {
+                attr {
+                    height(42f)
+                    marginTop(8f)
+                    flexDirectionRow()
+                    alignItemsCenter()
+                    paddingLeft(12f)
+                    paddingRight(12f)
+                    borderRadius(9f)
+                    backgroundColor(Color.TRANSPARENT)
+                }
                 Image { attr { src(ImageUri.commonAssets("sliders.svg")); size(20f, 20f); tintColor(tokens.icon) } }
                 Text {
                     attr {
@@ -474,48 +498,23 @@ internal fun ViewContainer<*, *>.DshSessionDrawer(
                     event { click { onOpenArchived() } }
                 }
             }
-            Scroller {
+            List {
                 attr { flex(1f) }
-                vif({ !isWebTimeline() }) {
-                    vfor({ sessions() }) { session ->
+                vforLazy({ sessions() }) { session, _, _ ->
+                    View {
+                        attr { height(52f) }
                         DshSessionDrawerRow(
                             title = session.title,
-                            subtitle = session.workspace,
+                            subtitle = if (session.cwd.isEmpty()) {
+                                session.workspace
+                            } else {
+                                session.cwd
+                            },
                             active = activeId() == session.id,
                             running = session.running,
                             onSelect = { onSelect(session.id) },
                             onLongPress = { onManage(session.id) },
                         )
-                    }
-                }
-                vif({ isWebTimeline() }) {
-                    vfor({ workspaceGroups() }) { group ->
-                        View {
-                            attr {
-                                marginTop(10f)
-                                marginBottom(6f)
-                                flexDirectionColumn()
-                            }
-                            Text {
-                                attr {
-                                    text(group.title + if (group.path.isEmpty()) "" else " · ${group.path}")
-                                    lines(1)
-                                    fontSize(12f)
-                                    fontWeightMedium()
-                                    color(tokens.secondaryText)
-                                }
-                            }
-                            group.sessions.forEach { session ->
-                                DshSessionDrawerRow(
-                                    title = session.title,
-                                    subtitle = if (session.cwd.isEmpty()) group.title else session.cwd,
-                                    active = activeId() == session.id,
-                                    running = session.running,
-                                    onSelect = { onSelect(session.id) },
-                                    onLongPress = { onManage(session.id) },
-                                )
-                            }
-                        }
                     }
                 }
             }
@@ -607,12 +606,31 @@ internal fun ViewContainer<*, *>.DshSessionDrawerRow(
                 }
             }
         }
+        vif({ onLongPress != null }) {
+            View {
+                attr {
+                    width(44f)
+                    height(48f)
+                    allCenter()
+                    zIndex(8)
+                }
+                Text {
+                    attr {
+                        text("···")
+                        fontSize(16f)
+                        fontWeightBold()
+                        color(tokens.icon)
+                    }
+                }
+                event {
+                    click { onLongPress?.invoke() }
+                }
+            }
+        }
         event {
             click { onSelect() }
             if (onLongPress != null) {
-                longPress { params ->
-                    if (params.state == "start") onLongPress()
-                }
+                longPress { onLongPress() }
             }
         }
     }
@@ -1305,26 +1323,25 @@ internal fun ViewContainer<*, *>.DshSessionRenameModal(
                     flexDirectionRow()
                     justifyContentFlexEnd()
                 }
-                Text {
-                    attr {
-                        text("取消")
-                        width(78f)
-                        height(38f)
-                        textAlignCenter()
-                        fontSize(14f)
-                        color(tokens.secondaryText)
+                View {
+                    attr { width(78f); height(38f); allCenter() }
+                    Text {
+                        attr {
+                            text("取消")
+                            fontSize(14f)
+                            color(tokens.secondaryText)
+                        }
                     }
                     event { click { if (!busy()) onClose() } }
                 }
-                Text {
-                    attr {
-                        text(if (busy()) "保存中..." else "保存")
-                        width(88f)
-                        height(38f)
-                        marginLeft(8f)
-                        textAlignCenter()
-                        fontSize(14f)
-                        color(if (busy()) tokens.primaryDisabled else tokens.primary)
+                View {
+                    attr { width(88f); height(38f); marginLeft(8f); allCenter() }
+                    Text {
+                        attr {
+                            text(if (busy()) "保存中..." else "保存")
+                            fontSize(14f)
+                            color(if (busy()) tokens.primaryDisabled else tokens.primary)
+                        }
                     }
                     event { click { if (!busy()) onSave() } }
                 }
@@ -1563,6 +1580,7 @@ internal fun ViewContainer<*, *>.DshArchivedSessionsModal(
             paddingRight(16f)
             backgroundColor(tokens.scrim)
         }
+        event { click { onClose() } }
         View {
             attr {
                 width(pagerData.pageViewWidth - 32f)
@@ -1572,6 +1590,7 @@ internal fun ViewContainer<*, *>.DshArchivedSessionsModal(
                 borderRadius(16f)
                 backgroundColor(tokens.background)
             }
+            event { click { } }
             View {
                 attr {
                     height(44f)
@@ -1587,16 +1606,21 @@ internal fun ViewContainer<*, *>.DshArchivedSessionsModal(
                         color(tokens.primaryText)
                     }
                 }
-                Text {
+                View {
                     attr {
-                        text("关闭")
                         width(52f)
                         height(36f)
-                        textAlignCenter()
-                        fontSize(13f)
-                        color(tokens.primary)
+                        allCenter()
+                    }
+                    Text {
+                        attr {
+                            text("关闭")
+                            fontSize(13f)
+                            color(tokens.primary)
+                        }
                     }
                     event { click { onClose() } }
+                    DshHitButton { onClose() }
                 }
             }
             Text {

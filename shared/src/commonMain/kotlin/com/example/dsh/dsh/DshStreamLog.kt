@@ -3,12 +3,23 @@ package com.example.dsh.dsh
 import com.tencent.kuikly.core.log.KLog
 import com.tencent.kuiklybase.streaming.MarkdownBlock
 
-/** Logcat filter: `DshStream`. */
+/** Logcat filter: `DshStream`. Also writes the in-app log center. */
 internal object DshStreamLog {
     private const val TAG = "DshStream"
 
     fun i(message: String) {
         KLog.i(TAG, message)
+        DshAppLog.ingestLine(DshLogLevel.INFO, message)
+    }
+
+    fun w(message: String) {
+        KLog.i(TAG, message)
+        DshAppLog.ingestLine(DshLogLevel.WARN, message)
+    }
+
+    fun e(message: String) {
+        KLog.e(TAG, message)
+        DshAppLog.ingestLine(DshLogLevel.ERROR, message)
     }
 
     fun question(message: String) {
@@ -25,7 +36,7 @@ internal object DshStreamLog {
         if (blocks.isEmpty()) return "blockCount=0"
         val items = blocks.joinToString("; ") { block ->
             val kind = blockKind(block.blockContent)
-            "#${block.blockIndex} kind=$kind id=${block.id} chars=${block.blockContent.length} '${preview(block.blockContent, 48)}'"
+            "#${block.blockIndex} kind=$kind id=${block.id} chars=${block.blockContent.length}"
         }
         return "blockCount=${blocks.size} [$items]"
     }

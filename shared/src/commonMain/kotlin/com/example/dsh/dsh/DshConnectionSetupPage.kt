@@ -2,14 +2,18 @@ package com.example.dsh.dsh
 
 import com.example.dsh.base.BasePager
 import com.example.dsh.base.bridgeModule
+import com.example.dsh.theme.theme
 import com.example.dsh.theme.tokens
 import com.tencent.kuikly.core.annotations.Page
 import com.tencent.kuikly.core.base.*
+import com.tencent.kuikly.core.base.attr.ImageUri
 import com.tencent.kuikly.core.directives.vif
 import com.tencent.kuikly.core.module.RouterModule
 import com.tencent.kuikly.core.module.SharedPreferencesModule
 import com.tencent.kuikly.core.nvi.serialization.json.JSONObject
 import com.tencent.kuikly.core.reactive.handler.observable
+import com.tencent.kuikly.core.reactive.handler.observableList
+import com.tencent.kuikly.core.views.Image
 import com.tencent.kuikly.core.views.Input
 import com.tencent.kuikly.core.views.Modal
 import com.tencent.kuikly.core.views.Text
@@ -41,6 +45,13 @@ internal class DshConnectionSetupPage : BasePager() {
     private var localStore: DshLocalStore? = null
     private var engineModule: DshEngineModule? = null
     private var probeRepository: DshRepository? = null
+    private var appearanceVisible by observable(false)
+    private var logCenterVisible by observable(false)
+    private var logQuery by observable("")
+    private var logSessionQuery by observable("")
+    private var logFilterId by observable(DshLogFilter.ALL.id)
+    private var logDetailId by observable(0L)
+    private val logVisibleEntries by observableList<DshLogEntry>()
 
     override fun created() {
         super.created()
@@ -104,6 +115,7 @@ internal class DshConnectionSetupPage : BasePager() {
                     autoDarkEnable(false)
                     paddingTop(pagerData.statusBarHeight)
                     backgroundColor(tokens.background)
+                    opacity(if (theme.revision >= 0) 1f else 1f)
                 }
                 View {
                     attr {
@@ -111,11 +123,34 @@ internal class DshConnectionSetupPage : BasePager() {
                         flexDirectionRow()
                         alignItemsCenter()
                         paddingLeft(20f)
-                        paddingRight(20f)
+                        paddingRight(12f)
                         backgroundColor(tokens.surface)
                         borderBottom(Border(1f, BorderStyle.SOLID, tokens.divider))
                     }
                     DshWordmark(height = 24f)
+                    View { attr { flex(1f) } }
+                    View {
+                        attr { size(40f, 40f); allCenter() }
+                        Image {
+                            attr {
+                                src(ImageUri.commonAssets("log.svg"))
+                                size(20f, 20f)
+                                tintColor(tokens.icon)
+                            }
+                        }
+                        event { click { ctx.openLogCenter() } }
+                    }
+                    View {
+                        attr { size(40f, 40f); allCenter() }
+                        Image {
+                            attr {
+                                src(ImageUri.commonAssets("appearance.svg"))
+                                size(20f, 20f)
+                                tintColor(tokens.icon)
+                            }
+                        }
+                        event { click { ctx.appearanceVisible = true } }
+                    }
                 }
                 View {
                     attr {
@@ -125,7 +160,7 @@ internal class DshConnectionSetupPage : BasePager() {
                         paddingTop(40f)
                         flexDirectionColumn()
                     }
-                    Text { attr { text("连接 DSH"); fontSize(28f); fontWeightBold(); color(tokens.primaryText) } }
+                    Text { attr { text("连接 DSH"); fontSize(28f); fontWeightNormal(); color(tokens.primaryText) } }
                     Text { attr { text("选择电脑上的 Agent"); marginTop(10f); fontSize(15f); color(tokens.secondaryText) } }
                     View {
                         attr { height(48f); marginTop(24f); flexDirectionRow(); padding(4f); borderRadius(10f); backgroundColor(tokens.surfaceVariant) }
@@ -137,7 +172,7 @@ internal class DshConnectionSetupPage : BasePager() {
                             Text { attr { text("扫描电脑 Settings > Remote Access 中的二维码。首版只保存一台电脑。"); marginTop(16f); fontSize(14f); lineHeight(21f); color(tokens.secondaryText) } }
                         }
                         vif({ ctx.relayPaired }) {
-                            Text { attr { text(ctx.relayHostName.ifEmpty { "已配对电脑" }); marginTop(16f); fontSize(16f); fontWeightBold(); color(tokens.primaryText) } }
+                            Text { attr { text(ctx.relayHostName.ifEmpty { "已配对电脑" }); marginTop(16f); fontSize(16f); fontWeightNormal(); color(tokens.primaryText) } }
                             Text { attr { text(ctx.relayOrigin); marginTop(6f); fontSize(13f); color(tokens.secondaryText) } }
                             Text { attr { text(ctx.relayMessage.ifEmpty { "已保存配对，连接后进入聊天" }); marginTop(8f); fontSize(13f); color(tokens.secondaryText) } }
                         }
@@ -183,14 +218,47 @@ internal class DshConnectionSetupPage : BasePager() {
                             marginBottom(24f)
                             borderRadius(10f)
                             backgroundColor(if (ctx.busy) tokens.primaryDisabled else tokens.primary)
-                            titleAttr { text(when (ctx.connectionMode) {
-                                DshConnectionMode.SSH -> "保存并连接电脑"
-                                DshConnectionMode.RELAY -> if (ctx.relayPaired) "连接已配对电脑" else "请先扫码"
-                                DshConnectionMode.LOCAL -> "请改用 DSH Local"
-                            }); fontSize(15f); color(tokens.onPrimary) }
+                            titleAttr {
+                                text(when (ctx.connectionMode) {
+                                    DshConnectionMode.SSH -> "保存并连接电脑"
+                                    DshConnectionMode.RELAY -> if (ctx.relayPaired) "连接已配对电脑" else "请先扫码"
+                                    DshConnectionMode.LOCAL -> "请改用 DSH Local"
+                                })
+                                fontSize(15f)
+                                fontWeightNormal()
+                                color(tokens.onPrimary)
+                            }
                         }
                         event { click { if (!ctx.busy) ctx.continueToHost() } }
                     }
+                }
+                vif({ ctx.appearanceVisible }) {
+                    DshAppearanceModal(
+                        onSelect = { ctx.setThemePreference(it) },
+                        onSelectCodeTheme = { ctx.setCodeThemePreference(it) },
+                        onToggleHighContrast = { ctx.setHighContrast(it) },
+                        onClose = { ctx.appearanceVisible = false },
+                    )
+                }
+                vif({ ctx.logCenterVisible }) {
+                    DshLogCenterModal(
+                        query = { ctx.logQuery },
+                        sessionQuery = { ctx.logSessionQuery },
+                        filterId = { ctx.logFilterId },
+                        entries = { ctx.logVisibleEntries },
+                        detail = { ctx.selectedLog() },
+                        onQueryChange = { ctx.logQuery = it; ctx.refreshVisibleLogs() },
+                        onSessionQueryChange = { ctx.logSessionQuery = it; ctx.refreshVisibleLogs() },
+                        onFilterChange = { ctx.logFilterId = it; ctx.logDetailId = 0L; ctx.refreshVisibleLogs() },
+                        onOpen = { ctx.logDetailId = it.id },
+                        onCloseDetail = { ctx.logDetailId = 0L },
+                        onCopy = { ctx.copyLogs() },
+                        onExport = { ctx.shareLogs(false) },
+                        onFeedback = { ctx.shareLogs(true) },
+                        onClear = { ctx.clearLogs() },
+                        onJump = { ctx.bridgeModule.toast("连接页无法跳转会话，进入聊天后再试") },
+                        onClose = { ctx.logCenterVisible = false; ctx.logDetailId = 0L },
+                    )
                 }
             }
         }
@@ -403,6 +471,62 @@ internal class DshConnectionSetupPage : BasePager() {
                 else -> DshSessionScope.DEFAULT_REMOTE_PROFILE_ID
             })
         })
+    }
+
+    override fun onAppLogChanged() {
+        if (logCenterVisible) refreshVisibleLogs()
+    }
+
+    private fun openLogCenter() {
+        logCenterVisible = true
+        logDetailId = 0L
+        refreshVisibleLogs()
+    }
+
+    private fun selectedLog(): DshLogEntry? =
+        DshAppLog.snapshot().firstOrNull { it.id == logDetailId }
+
+    private fun currentLogFilter(): DshLogFilter =
+        DshLogFilter.entries.firstOrNull { it.id == logFilterId } ?: DshLogFilter.ALL
+
+    private fun refreshVisibleLogs() {
+        val next = DshAppLog.filtered(currentLogFilter(), logQuery, logSessionQuery)
+        logVisibleEntries.diffUpdate(next) { old, new -> old.id == new.id }
+        val count = minOf(logVisibleEntries.size, next.size)
+        for (index in 0 until count) {
+            if (logVisibleEntries[index] != next[index]) logVisibleEntries[index] = next[index]
+        }
+    }
+
+    private fun copyLogs() {
+        val text = selectedLog()?.let(::dshFormatLogLine)
+            ?: DshAppLog.exportText(DshAppLog.filtered(currentLogFilter(), logQuery, logSessionQuery))
+        val value = dshSanitizeLogText(text).trim()
+        if (value.isEmpty()) {
+            bridgeModule.toast("没有可复制的内容")
+            return
+        }
+        bridgeModule.copyToPasteboard(value)
+        bridgeModule.toast("已复制")
+    }
+
+    private fun shareLogs(feedback: Boolean) {
+        val meta = runCatching { JSONObject(bridgeModule.feedbackMeta()) }.getOrDefault(JSONObject())
+        val exported = DshAppLog.exportText(
+            DshAppLog.filtered(currentLogFilter(), logQuery, logSessionQuery),
+            connectionMode = connectionMode.name.lowercase(),
+            appVersion = meta.optString("appVersion"),
+            device = meta.optString("device"),
+        )
+        val title = if (feedback) "dsh-feedback.html" else "dsh-logs.html"
+        bridgeModule.shareHtml(title, "<pre>${dshEscapeHtml(dshSanitizeLogText(exported))}</pre>")
+    }
+
+    private fun clearLogs() {
+        DshAppLog.clear()
+        logDetailId = 0L
+        refreshVisibleLogs()
+        bridgeModule.toast("已清空本地日志")
     }
 
     private fun prefs(): SharedPreferencesModule = acquireModule(SharedPreferencesModule.MODULE_NAME)

@@ -25,6 +25,7 @@ internal fun DshMessage.isCopyExportable(): Boolean {
     if (isReasoning || isContextInjection) return false
     if (role == DshMessageRole.ERROR) return false
     if (attachmentId != null) return true
+    if (attachments.isNotEmpty()) return true
     return when (role) {
         DshMessageRole.USER,
         DshMessageRole.ASSISTANT,
@@ -53,7 +54,7 @@ internal fun DshMessage.toExportBlock(displayedContent: String = content): DshEx
     }
     return when (role) {
         DshMessageRole.USER -> {
-            val body = displayedContent.trim()
+            val body = dshUserReadableText(this, displayedContent).trim()
             if (body.isEmpty()) null else DshExportBlock(DshExportRole.USER, body)
         }
         DshMessageRole.ASSISTANT -> {
@@ -310,6 +311,36 @@ private fun dshToolHtml(message: DshMessage, displayedContent: String): String {
     val header = dshEscapeHtml(dshToolHeaderLine(message))
     val body = dshEscapeHtml(dshToolBody(message, displayedContent)).replace("\n", "<br>")
     return """<div class="card-meta">$header</div><div>$body</div>"""
+}
+
+internal fun dshUserReadableText(message: DshMessage, displayedContent: String): String {
+    val parts = mutableListOf<String>()
+    displayedContent.trim().takeIf { it.isNotEmpty() }?.let(parts::add)
+    message.attachments.forEach { ref ->
+        parts += dshImageRefReadableText(ref)
+    }
+    return parts.joinToString("\n")
+}
+
+internal fun dshImageRefReadableText(ref: DshImageAttachmentRef): String {
+    val name = ref.name.trim().ifEmpty { "图片" }
+    val id = ref.attachmentId.ifEmpty { ref.localId }
+    val facts = listOfNotNull(
+        ref.mediaType.takeIf { it.isNotEmpty() },
+        ref.bytes.takeIf { it > 0 }?.let { "$it B" },
+        if (ref.width > 0 && ref.height > 0) "${ref.width}×${ref.height}" else null,
+    )
+    return buildString {
+        append("附件 · $name")
+        if (facts.isNotEmpty()) {
+            append('\n')
+            append(facts.joinToString(" · "))
+        }
+        if (id.isNotEmpty()) {
+            append('\n')
+            append("引用：$id")
+        }
+    }
 }
 
 internal fun dshAttachmentReadableText(attachmentId: String, nameHint: String = ""): String {

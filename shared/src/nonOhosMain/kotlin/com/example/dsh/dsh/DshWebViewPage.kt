@@ -1,6 +1,7 @@
 package com.example.dsh.dsh
 
 import com.example.dsh.base.BasePager
+import com.example.dsh.theme.theme
 import com.example.dsh.theme.tokens
 import com.tencent.kuikly.core.annotations.Page
 import com.tencent.kuikly.core.base.Border
@@ -41,6 +42,7 @@ internal class DshWebViewPage : BasePager() {
                     autoDarkEnable(false)
                     backgroundColor(tokens.background)
                     paddingTop(pagerData.statusBarHeight)
+                    opacity(if (theme.revision >= 0) 1f else 1f)
                 }
                 DshLinkHeader(
                     status = { ctx.status },

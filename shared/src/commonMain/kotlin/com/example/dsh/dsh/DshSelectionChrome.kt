@@ -194,6 +194,7 @@ internal fun ViewContainer<*, *>.DshMessageOverflowModal(
     visible: () -> Boolean,
     onSelectMessages: () -> Unit,
     onExportSession: () -> Unit,
+    onManageSession: () -> Unit = {},
     onClose: () -> Unit,
 ) {
     vif({ visible() }) {
@@ -215,37 +216,64 @@ internal fun ViewContainer<*, *>.DshMessageOverflowModal(
                     backgroundColor(tokens.surface)
                 }
                 event { click { } }
-                Text {
+                View {
                     attr {
-                        text("选择消息")
                         height(48f)
-                        textAlignCenter()
-                        fontSize(16f)
-                        color(tokens.primaryText)
+                        allCenter()
                     }
-                    event { click { onSelectMessages() } }
+                    Text {
+                        attr {
+                            text("选择消息")
+                            fontSize(16f)
+                            color(tokens.primaryText)
+                        }
+                    }
+                    DshHitButton { onSelectMessages() }
                 }
                 View { attr { height(1f); backgroundColor(tokens.divider) } }
-                Text {
+                View {
                     attr {
-                        text("导出当前会话")
                         height(48f)
-                        textAlignCenter()
-                        fontSize(16f)
-                        color(tokens.primaryText)
+                        allCenter()
                     }
-                    event { click { onExportSession() } }
+                    Text {
+                        attr {
+                            text("导出当前会话")
+                            fontSize(16f)
+                            color(tokens.primaryText)
+                        }
+                    }
+                    DshHitButton { onExportSession() }
+                }
+                View { attr { height(1f); backgroundColor(tokens.divider) } }
+                View {
+                    attr {
+                        height(48f)
+                        allCenter()
+                    }
+                    Text {
+                        attr {
+                            text("管理当前会话")
+                            fontSize(16f)
+                            color(tokens.primaryText)
+                        }
+                    }
+                    DshHitButton { onManageSession() }
                 }
                 View { attr { height(8f); backgroundColor(tokens.background) } }
-                Text {
+                View {
                     attr {
-                        text("取消")
                         height(48f)
-                        textAlignCenter()
-                        fontSize(16f)
-                        color(tokens.secondaryText)
+                        allCenter()
                     }
-                    event { click { onClose() } }
+                    Text {
+                        attr {
+                            text("取消")
+                            fontSize(16f)
+                            color(tokens.secondaryText)
+                        }
+                    }
+                    DshHitButton { onClose() }
                 }
             }
         }

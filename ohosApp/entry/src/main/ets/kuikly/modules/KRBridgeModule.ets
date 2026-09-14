@@ -53,6 +53,9 @@ export class KRBridgeModule extends KuiklyRenderBaseModule {
         this.shareHtml(params);
         break;
       }
+      case 'getFeedbackMeta': {
+        return '{"appVersion":"","device":"HarmonyOS"}';
+      }
       case KRBridgeModule.TOAST: {
         this.toast(params);
         break;

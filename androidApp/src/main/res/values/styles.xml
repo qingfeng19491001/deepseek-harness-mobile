@@ -1,4 +1,29 @@
-<resources>
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
 
-    <style name="AppTheme" parent="android:Theme.Material.NoActionBar" />
+    <!-- 进程冷启动第一帧：日间先用浅底，避免 Theme.AppCompat 默认白窗。 -->
+    <style name="Theme.Dsh" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:windowBackground">@color/dsh_background_light</item>
+        <item name="android:statusBarColor">@color/dsh_background_light</item>
+        <item name="android:navigationBarColor">@color/dsh_background_light</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="o">true</item>
+        <item name="android:forceDarkAllowed" tools:targetApi="q">false</item>
+    </style>
+
+    <style name="Theme.Dsh.Light" parent="Theme.Dsh">
+        <item name="android:windowBackground">@color/dsh_background_light</item>
+        <item name="android:statusBarColor">@color/dsh_background_light</item>
+        <item name="android:navigationBarColor">@color/dsh_background_light</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="o">true</item>
+    </style>
+
+    <style name="Theme.Dsh.Dark" parent="Theme.Dsh">
+        <item name="android:windowBackground">@color/dsh_background_dark</item>
+        <item name="android:statusBarColor">@color/dsh_background_dark</item>
+        <item name="android:navigationBarColor">@color/dsh_background_dark</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="o">false</item>
+    </style>
 </resources>

@@ -30,6 +30,8 @@ internal object DshRemoteMux {
             DshHostProtocol.SETTINGS_DESCRIBE,
             DshHostProtocol.LLM_PROVIDERS,
             DshHostProtocol.AGENT_PRESET_LIST,
+            DshHostProtocol.SKILL_LIST,
+            DshHostProtocol.PLUGIN_INVENTORY_LIST,
             -> JSONObject().put("args", JSONObject())
             DshHostProtocol.SESSION_LIST -> JSONObject().put(
                 "args",

@@ -2,6 +2,7 @@ package com.example.dsh.dsh
 
 import com.example.dsh.base.BasePager
 import com.example.dsh.base.bridgeModule
+import com.example.dsh.theme.theme
 import com.example.dsh.theme.tokens
 import com.tencent.kuikly.core.annotations.Page
 import com.tencent.kuikly.core.base.*
@@ -103,6 +104,12 @@ internal class DshHomePage : BasePager() {
     private var apiKeyDraft by observable("")
     private var credentialSetupVisible by observable(false)
     private var appearanceVisible by observable(false)
+    private var logCenterVisible by observable(false)
+    private var logQuery by observable("")
+    private var logSessionQuery by observable("")
+    private var logFilterId by observable(DshLogFilter.ALL.id)
+    private var logDetailId by observable(0L)
+    private val logVisibleEntries by observableList<DshLogEntry>()
     private var pluginMenuVisible by observable(false)
     private var pluginDetailId by observable("")
     private var pluginConfirmAction by observable("")
@@ -148,6 +155,7 @@ internal class DshHomePage : BasePager() {
     private var imagePreviewTitle by observable("")
     private var imagePreviewCaption by observable("")
     private var imagePreviewAttachmentId = ""
+    private var imagePreviewDraftLocalId by observable("")
     private var voiceActive by observable(false)
     private var topBarRef: ViewRef<com.tencent.kuikly.core.views.DivView>? = null
     private var inputView: InputView? = null
@@ -281,6 +289,7 @@ internal class DshHomePage : BasePager() {
                     autoDarkEnable(false)
                     backgroundColor(tokens.background)
                     paddingTop(pagerData.statusBarHeight)
+                    opacity(if (theme.revision >= 0) 1f else 1f)
                 }
 
                 View {
@@ -608,6 +617,7 @@ internal class DshHomePage : BasePager() {
                         onOpenSettings = { ctx.openConnectionSettings() },
                         onOpenAppearance = { ctx.appearanceVisible = true },
                         onOpenPlugins = { ctx.openPluginMenu() },
+                        onOpenLogs = { ctx.openLogCenter() },
                         onNewSession = { ctx.createSession() },
                         onOpenArchived = { ctx.archivedSessionsVisible = true },
                         sort = { ctx.sessionSort },
@@ -628,6 +638,27 @@ internal class DshHomePage : BasePager() {
                         onSelectCodeTheme = { ctx.setCodeThemePreference(it) },
                         onToggleHighContrast = { ctx.setHighContrast(it) },
                         onClose = { ctx.appearanceVisible = false },
+                    )
+                }
+
+                vif({ ctx.logCenterVisible }) {
+                    DshLogCenterModal(
+                        query = { ctx.logQuery },
+                        sessionQuery = { ctx.logSessionQuery },
+                        filterId = { ctx.logFilterId },
+                        entries = { ctx.logVisibleEntries },
+                        detail = { ctx.selectedLog() },
+                        onQueryChange = { ctx.updateLogQuery(it) },
+                        onSessionQueryChange = { ctx.updateLogSessionQuery(it) },
+                        onFilterChange = { ctx.updateLogFilter(it) },
+                        onOpen = { ctx.logDetailId = it.id },
+                        onCloseDetail = { ctx.logDetailId = 0L },
+                        onCopy = { ctx.copyLogs() },
+                        onExport = { ctx.shareLogs(feedback = false) },
+                        onFeedback = { ctx.shareLogs(feedback = true) },
+                        onClear = { ctx.clearLogs() },
+                        onJump = { ctx.jumpFromLog(it) },
+                        onClose = { ctx.closeLogCenter() },
                     )
                 }
 
@@ -690,12 +721,18 @@ internal class DshHomePage : BasePager() {
                     title = { ctx.imagePreviewTitle },
                     src = { ctx.imagePreviewSrc },
                     caption = { ctx.imagePreviewCaption },
+                    deletable = { ctx.imagePreviewDraftLocalId.isNotEmpty() },
+                    onDelete = { ctx.deletePreviewedDraftImage() },
                     onClose = { ctx.closeImagePreview() },
                 )
                 DshMessageOverflowModal(
                     visible = { ctx.messageOverflowVisible },
                     onSelectMessages = { ctx.enterMessageSelect() },
                     onExportSession = { ctx.exportActiveSessionHtml() },
+                    onManageSession = {
+                        ctx.messageOverflowVisible = false
+                        ctx.openSessionManage(ctx.activeSessionId)
+                    },
                     onClose = { ctx.messageOverflowVisible = false },
                 )
 
@@ -1045,6 +1082,86 @@ internal class DshHomePage : BasePager() {
                 refreshVisiblePlugins()
             }
         }
+    }
+
+    override fun onAppLogChanged() {
+        if (logCenterVisible) refreshVisibleLogs()
+    }
+
+    private fun openLogCenter() {
+        closeSessionDrawer()
+        logCenterVisible = true
+        logDetailId = 0L
+        refreshVisibleLogs()
+    }
+
+    private fun closeLogCenter() {
+        logCenterVisible = false
+        logDetailId = 0L
+    }
+
+    private fun selectedLog(): DshLogEntry? =
+        DshAppLog.snapshot().firstOrNull { it.id == logDetailId }
+
+    private fun currentLogFilter(): DshLogFilter =
+        DshLogFilter.entries.firstOrNull { it.id == logFilterId } ?: DshLogFilter.ALL
+
+    private fun updateLogQuery(query: String) {
+        logQuery = query
+        refreshVisibleLogs()
+    }
+
+    private fun updateLogSessionQuery(query: String) {
+        logSessionQuery = query
+        refreshVisibleLogs()
+    }
+
+    private fun updateLogFilter(filterId: String) {
+        logFilterId = filterId
+        logDetailId = 0L
+        refreshVisibleLogs()
+    }
+
+    private fun refreshVisibleLogs() {
+        val next = DshAppLog.filtered(currentLogFilter(), logQuery, logSessionQuery)
+        logVisibleEntries.diffUpdate(next) { old, new -> old.id == new.id }
+        val count = minOf(logVisibleEntries.size, next.size)
+        for (index in 0 until count) {
+            if (logVisibleEntries[index] != next[index]) logVisibleEntries[index] = next[index]
+        }
+    }
+
+    private fun copyLogs() {
+        val text = selectedLog()?.let(::dshFormatLogLine)
+            ?: DshAppLog.exportText(DshAppLog.filtered(currentLogFilter(), logQuery, logSessionQuery))
+        copyPlainText(dshSanitizeLogText(text))
+    }
+
+    private fun shareLogs(feedback: Boolean) {
+        val meta = runCatching { JSONObject(bridgeModule.feedbackMeta()) }.getOrDefault(JSONObject())
+        val exported = DshAppLog.exportText(
+            DshAppLog.filtered(currentLogFilter(), logQuery, logSessionQuery),
+            connectionMode = connectionMode.name.lowercase(),
+            appVersion = meta.optString("appVersion"),
+            device = meta.optString("device"),
+        )
+        val body = dshSanitizeLogText(exported)
+        val title = if (feedback) "dsh-feedback.html" else "dsh-logs.html"
+        bridgeModule.shareHtml(title, "<pre>${dshEscapeHtml(body)}</pre>")
+    }
+
+    private fun clearLogs() {
+        DshAppLog.clear()
+        logDetailId = 0L
+        refreshVisibleLogs()
+        bridgeModule.toast("已清空本地日志")
+    }
+
+    private fun jumpFromLog(sessionId: String) {
+        if (sessionId.isEmpty()) return
+        closeLogCenter()
+        closeSessionDrawer()
+        selectSession(sessionId)
     }
 
     private fun updatePluginQuery(query: String) {
@@ -2539,6 +2656,7 @@ internal class DshHomePage : BasePager() {
     private fun openSessionManage(sessionId: String) {
         if (sessionId.isEmpty()) return
         if (isRemoteHost && sessions.none { it.id == sessionId } && archivedSessions.none { it.id == sessionId }) return
+        closeSessionDrawer()
         sessionManageTargetId = sessionId
     }
 
@@ -3814,6 +3932,12 @@ internal class DshHomePage : BasePager() {
         cachedAttachmentDataUrls.remove(localId)
     }
 
+    private fun deletePreviewedDraftImage() {
+        val localId = imagePreviewDraftLocalId
+        closeImagePreview()
+        if (localId.isNotEmpty()) removeDraftImage(localId)
+    }
+
     private fun retryDraftImage(localId: String) {
         val index = draftImages.indexOfFirst { it.localId == localId }
         if (index < 0 || streaming || attachmentsSending) return
@@ -3828,6 +3952,7 @@ internal class DshHomePage : BasePager() {
 
     private fun previewDraftImage(image: DshDraftImage) {
         imagePreviewAttachmentId = ""
+        imagePreviewDraftLocalId = image.localId
         imagePreviewTitle = image.name.ifEmpty { "图片" }
         imagePreviewSrc = image.previewDataUrl()
         imagePreviewCaption = buildString {
@@ -3841,6 +3966,7 @@ internal class DshHomePage : BasePager() {
     private fun previewAttachment(ref: DshImageAttachmentRef) {
         val key = ref.localId.ifEmpty { ref.attachmentId }
         imagePreviewAttachmentId = ref.attachmentId
+        imagePreviewDraftLocalId = ""
         imagePreviewTitle = ref.name.ifEmpty { "图片" }
         imagePreviewSrc = attachmentDataUrl(key).orEmpty().ifEmpty {
             attachmentDataUrl(ref.attachmentId).orEmpty()
@@ -3858,6 +3984,7 @@ internal class DshHomePage : BasePager() {
         imagePreviewTitle = ""
         imagePreviewCaption = ""
         imagePreviewAttachmentId = ""
+        imagePreviewDraftLocalId = ""
     }
 
     private fun clearDraftImages() {

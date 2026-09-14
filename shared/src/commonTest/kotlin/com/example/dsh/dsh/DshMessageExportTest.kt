@@ -117,6 +117,25 @@ class DshMessageExportTest {
         val messages = listOf(user, think, assistant, tool, hidden, error)
 
         assertEquals("你好", user.toReadableCopy())
+        val userImage = DshMessage(
+            "u-img",
+            DshMessageRole.USER,
+            "看这张",
+            attachments = listOf(
+                DshImageAttachmentRef(
+                    attachmentId = "sha256:user",
+                    mediaType = "image/png",
+                    bytes = 12,
+                    width = 8,
+                    height = 8,
+                    name = "shot.png",
+                ),
+            ),
+        )
+        assertEquals(
+            "看这张\n附件 · shot.png\nimage/png · 12 B · 8×8\n引用：sha256:user",
+            userImage.toReadableCopy(),
+        )
         assertEquals("用 Kotlin", assistant.toReadableCopy())
         assertNull(think.toExportBlock())
         assertNull(error.toExportBlock())

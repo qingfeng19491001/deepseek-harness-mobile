@@ -31,10 +31,15 @@ internal class BridgeModule : Module() {
     }
 
     fun shareHtml(filename: String, html: String) {
-        val methodArgs = JSONObject()
-        methodArgs.put("filename", filename)
-        methodArgs.put("html", html)
+        val methodArgs = JSONObject().apply {
+            put("filename", filename)
+            put("html", html)
+        }
         callNativeMethod("shareHtml", methodArgs, null)
+    }
+
+    fun feedbackMeta(): String {
+        return syncCallNativeMethod("getFeedbackMeta", JSONObject(), null)
     }
 
     fun showAlert(

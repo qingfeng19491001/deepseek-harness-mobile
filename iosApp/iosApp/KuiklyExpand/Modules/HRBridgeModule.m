@@ -31,6 +31,12 @@
     [DshNativeUi shareHtml:html filename:filename];
 }
 
+- (NSString *)getFeedbackMeta:(NSDictionary *)args {
+    NSString *version = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"";
+    NSString *device = [UIDevice currentDevice].model ?: @"";
+    return [NSString stringWithFormat:@"{\"appVersion\":\"%@\",\"device\":\"%@\"}", version, device];
+}
+
 - (void)log:(NSDictionary *)args {
     NSDictionary *params = [args[KR_PARAM_KEY] hr_stringToDictionary];
     NSString *content = params[@"content"];

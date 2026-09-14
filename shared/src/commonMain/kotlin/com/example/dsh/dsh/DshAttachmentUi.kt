@@ -58,8 +58,8 @@ internal fun ViewContainer<*, *>.DshDraftImageStrip(
                             size(DRAFT_THUMB_SIZE, DRAFT_THUMB_SIZE)
                             resizeCover()
                         }
+                        event { click { onPreview(image) } }
                     }
-                    DshHitButton { onPreview(image) }
                     vif({ image.status == DshDraftImageStatus.SENDING || sending() }) {
                         View {
                             attr {
@@ -101,9 +101,9 @@ internal fun ViewContainer<*, *>.DshDraftImageStrip(
                     View {
                         attr {
                             absolutePosition(top = 4f, right = 4f)
-                            size(20f, 20f)
+                            size(22f, 22f)
                             allCenter()
-                            borderRadius(10f)
+                            borderRadius(11f)
                             backgroundColor(Color(0xCC000000L))
                         }
                         Image {
@@ -272,6 +272,8 @@ internal fun ViewContainer<*, *>.DshImagePreviewModal(
     title: () -> String,
     src: () -> String,
     caption: () -> String,
+    deletable: () -> Boolean = { false },
+    onDelete: () -> Unit = {},
     onClose: () -> Unit,
 ) {
     vif({ visible() }) {
@@ -351,6 +353,27 @@ internal fun ViewContainer<*, *>.DshImagePreviewModal(
                             color(Color(0xCCFFFFFFL))
                             marginTop(8f)
                         }
+                    }
+                }
+                vif({ deletable() }) {
+                    View {
+                        attr {
+                            marginTop(14f)
+                            height(44f)
+                            width(200f)
+                            allCenter()
+                            borderRadius(12f)
+                            backgroundColor(Color(0x33FFFFFFL))
+                        }
+                        Text {
+                            attr {
+                                text("删除")
+                                fontSize(15f)
+                                fontWeightMedium()
+                                color(Color.WHITE)
+                            }
+                        }
+                        DshHitButton { onDelete() }
                     }
                 }
             }

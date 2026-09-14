@@ -1,6 +1,8 @@
 package com.example.dsh.base
 
+import com.example.dsh.dsh.DshAppLog
 import com.example.dsh.dsh.DshEngineModule
+import com.example.dsh.dsh.DshLogLevel
 import com.example.dsh.dsh.DshRelayModule
 import com.example.dsh.dsh.DshSseModule
 import com.example.dsh.dsh.DshThemeModule
@@ -34,6 +36,7 @@ internal abstract class BasePager : Pager() {
         private set
 
     private var themeCallbackRef: CallbackRef? = null
+    private var logCallbackRef: CallbackRef? = null
 
     override fun createExternalModules(): Map<String, Module>? {
         val externalModules = hashMapOf<String, Module>()
@@ -61,13 +64,29 @@ internal abstract class BasePager : Pager() {
         )
         theme = DshTheme.snapshot
         themeCallbackRef = notifyModule().addNotify(DshTheme.EVENT) { theme = DshTheme.snapshot }
+        DshAppLog.publisher = { notifyModule().postNotify(DshAppLog.EVENT, JSONObject()) }
+        logCallbackRef = notifyModule().addNotify(DshAppLog.EVENT) { onAppLogChanged() }
+        ingestPersistedCrash()
+        DshAppLog.record(DshLogLevel.INFO, "app.start", "pager-created")
         scheduleSolarTick()
     }
+
+    protected open fun onAppLogChanged() {}
 
     override fun pageWillDestroy() {
         themeCallbackRef?.let { notifyModule().removeNotify(DshTheme.EVENT, it) }
         themeCallbackRef = null
+        logCallbackRef?.let { notifyModule().removeNotify(DshAppLog.EVENT, it) }
+        logCallbackRef = null
         super.pageWillDestroy()
+    }
+
+    private fun ingestPersistedCrash() {
+        val crash = readPref(DshAppLog.CRASH_KEY) ?: return
+        if (crash.isBlank()) return
+        DshAppLog.record(DshLogLevel.ERROR, "crash", crash.take(800))
+        persistOrToast(DshAppLog.CRASH_KEY, "")
+        acquireModule<BridgeModule>(BridgeModule.MODULE_NAME).toast("上次异常已写入日志中心")
     }
 
     override fun themeDidChanged(data: JSONObject) {

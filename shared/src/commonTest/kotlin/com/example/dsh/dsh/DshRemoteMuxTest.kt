@@ -40,6 +40,10 @@ class DshRemoteMuxTest {
         assertEquals("llm/listConfigurableProviders", DshRemoteMux.httpEndpoint("llm.providers"))
         assertEquals(0, DshRemoteMux.httpPayload("settings.describe", JSONObject(), "rpc")
             .optJSONObject("args")?.length())
+        assertEquals(0, DshRemoteMux.httpPayload("pluginInventory/list", JSONObject(), "rpc")
+            .optJSONObject("args")?.length())
+        assertEquals(0, DshRemoteMux.httpPayload("skill.list", JSONObject(), "rpc")
+            .optJSONObject("args")?.length())
     }
 
     @Test

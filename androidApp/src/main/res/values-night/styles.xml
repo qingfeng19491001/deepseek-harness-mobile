@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- 系统深色时，Application 主题第一帧用深底，避免锁定深色前闪白。 -->
+    <style name="Theme.Dsh" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:windowBackground">@color/dsh_background_dark</item>
+        <item name="android:statusBarColor">@color/dsh_background_dark</item>
+        <item name="android:navigationBarColor">@color/dsh_background_dark</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="o">false</item>
+        <item name="android:forceDarkAllowed" tools:targetApi="q">false</item>
+    </style>
+</resources>

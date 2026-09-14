@@ -1,5 +1,6 @@
 package com.example.dsh.module
 
+import com.example.dsh.DshThemeChrome
 import com.example.dsh.KuiklyRenderActivity
 import com.tencent.kuikly.core.render.android.export.KuiklyRenderBaseModule
 import com.tencent.kuikly.core.render.android.export.KuiklyRenderCallback
@@ -18,7 +19,10 @@ class KRDshThemeModule : KuiklyRenderBaseModule() {
     private fun applyNativeChrome(params: String?) {
         val isDark = JSONObject(params ?: "{}").optBoolean("isDark")
         val host = activity as? KuiklyRenderActivity ?: return
-        host.runOnUiThread { host.applyThemeChrome(isDark) }
+        host.runOnUiThread {
+            DshThemeChrome.applyDefaultNightMode(host)
+            host.applyThemeChrome(isDark)
+        }
     }
 
     companion object {

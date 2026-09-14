@@ -441,6 +441,7 @@ internal fun ViewContainer<*, *>.DshConversation(
                     backgroundColor(tokens.surface)
                     borderRadius(22f)
                     border(Border(1f, BorderStyle.SOLID, tokens.divider))
+                    opacity(if (theme.revision >= 0) 1f else 1f)
                 }
                 vif({
                     isWebTimeline() && draft().startsWith("/") &&

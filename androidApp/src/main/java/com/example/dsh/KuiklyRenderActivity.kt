@@ -52,11 +52,11 @@ class KuiklyRenderActivity : AppCompatActivity(), KuiklyRenderViewBaseDelegatorD
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-
-        // 在 inflate 布局之前就把窗口刷成解析后的主题色，避免深色模式下首帧白闪。
         lastSystemDark = DshThemeChrome.systemIsDark(this)
         currentIsDark = DshThemeChrome.resolveIsDark(this)
+        // 在 super.onCreate 前换主题，让窗口背景在第一帧就对上偏好，而不是先画 AppCompat 浅色底。
+        setTheme(if (currentIsDark) R.style.Theme_Dsh_Dark else R.style.Theme_Dsh_Light)
+        super.onCreate(savedInstanceState)
         DshThemeChrome.apply(this, currentIsDark)
 
         setContentView(R.layout.activity_hr)
@@ -125,6 +125,7 @@ class KuiklyRenderActivity : AppCompatActivity(), KuiklyRenderViewBaseDelegatorD
 
     override fun onResume() {
         super.onResume()
+        applyThemeChrome(DshThemeChrome.resolveIsDark(this), forceContainers = true)
         kuiklyRenderViewDelegator.onResume()
     }
 
