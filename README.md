@@ -15,7 +15,7 @@ App 启动后先选连接方式，再进入聊天。**扫码连电脑的完整�
 
 > 当前项目处于开发和验证阶段。请不要把它当作生产版本使用。
 
-## 运行截图
+## 运行演示
 
 以下截图均在 Android 真机、已连接电脑 DSH 时拍摄（`main` 最新构建）。业务 UI 在 `commonMain`，Android / iOS / 鸿蒙共用同一套页面；原生能力（主题 chrome、WebSocket mux、复制 / 分享、选图）三端均有对应 Module。
 
@@ -27,6 +27,10 @@ App 启动后先选连接方式，再进入聊天。**扫码连电脑的完整�
 | 任务四 · 会话管理 | 重命名、归档、导出为 HTML | <img src="docs/screenshots/task4-session.png" width="240" alt="任务四 会话管理" /> | [task4-session-management.mp4](docs/task4-session-management.mp4) |
 | 任务五 · 插件清单 | 官方只读清单、状态筛选（全部 / 运行中 / 已停用 / 失败 / 加载中） | <img src="docs/screenshots/task5-plugins.png" width="240" alt="任务五 插件清单" /> | [task5-plugin-status.mp4](docs/task5-plugin-status.mp4) |
 | 任务六 · 日志中心 | 分类筛选、复制 / 导出 / 清空；清空不影响会话 | <img src="docs/screenshots/task6-logs.png" width="240" alt="任务六 日志中心" /> | [task6-log-center.mp4](docs/task6-log-center.mp4) |
+
+### 完整视频演示
+
+[tasks-1-to-6.mp4](docs/tasks-1-to-6.mp4) — 任务一至任务六连续播放（约 4 分钟）。
 
 ## 项目定位
 
