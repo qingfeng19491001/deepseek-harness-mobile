@@ -24,7 +24,7 @@ App 启动后先选连接方式，再进入聊天。**扫码连电脑的完整�
 | 任务一 · 主题模式 | 外观：跟随系统 / 浅色 / 深色 / 日出日落；代码主题；深色立即生效 | <img src="docs/screenshots/task1-theme.png" width="240" alt="任务一 主题模式" /> | [task1-theme-mode.mp4](docs/task1-theme-mode.mp4) |
 | 任务二 · 复制与导出 | 消息「复制」、溢出菜单「选择消息 / 导出当前会话」 | <img src="docs/screenshots/task2-copy.png" width="240" alt="任务二 复制与导出" /> | [task2-copy-export.mp4](docs/task2-copy-export.mp4) |
 | 任务三 · 图片附件 | 「添加图片」、张数与大小限制、相册 / 拍照入口 | <img src="docs/screenshots/task3-attach.png" width="240" alt="任务三 图片附件" /> | [task3-image-upload.mp4](docs/task3-image-upload.mp4) |
-| 任务四 · 会话管理 | 重命名、归档、导出为 HTML | <img src="docs/screenshots/task4-session.png" width="240" alt="任务四 会话管理" /> | [task4-session-management.mp4](docs/task4-session-management.mp4) |
+| 任务四 · 会话管理 | 重命名、归档、恢复、永久删除、导出为 HTML | <img src="docs/screenshots/task4-session.png" width="240" alt="任务四 会话管理" /> | [task4-session-management.mp4](docs/task4-session-management.mp4) |
 | 任务五 · 插件清单 | 官方只读清单、状态筛选（全部 / 运行中 / 已停用 / 失败 / 加载中） | <img src="docs/screenshots/task5-plugins.png" width="240" alt="任务五 插件清单" /> | [task5-plugin-status.mp4](docs/task5-plugin-status.mp4) |
 | 任务六 · 日志中心 | 分类筛选、复制 / 导出 / 清空；清空不影响会话 | <img src="docs/screenshots/task6-logs.png" width="240" alt="任务六 日志中心" /> | [task6-log-center.mp4](docs/task6-log-center.mp4) |
 
@@ -39,6 +39,7 @@ DeepSeek Harness 本身是一个插件化 Agent 运行时。本仓库提供 Andr
 - 使用 Kuikly/Kotlin Multiplatform 实现主要 UI 和跨平台协议层；
 - 扫码 / SSH 远程模式用 HTTP RPC + WebSocket（`events.mux`）；
 - 侧栏「插件」展示电脑 Host 已加载插件；官方清单只读，安装 [`host-plugin/`](host-plugin/README.md) 后可查看配置、失败原因并安全启停；
+- 扫码插件额外提供会话恢复与永久删除（官方 Host 没有 `workspace.unarchiveSession` / `workspace.deleteSession`）；
 - 按连接模式隔离会话列表和消息缓存；
 - 通过扫码 Relay 或 SSH 隧道连接电脑上的 DSH Host。
 
@@ -65,15 +66,15 @@ App 连上 Host 之后的 JSON-RPC、事件流和会话时间线见 **[docs/app-
 
 最终要**同时开着三样**：电脑上的 Relay、电脑上的 DSH、手机上的 App。建议开两个电脑终端，都不要关。
 
-**终端 1 — Relay（默认 `127.0.0.1:8787`）**
+**终端 1 — Relay（默认端口 `8787`）**
 
 ```bash
-git clone https://github.com/yukiykchen/dsh-scan-remote.git
+git clone https://github.com/qingfeng19491001/dsh-scan-remote.git
 cd dsh-scan-remote/relay
 cp .env.example .env
 npm ci
 npm run build
-HOST=127.0.0.1 PORT=8787 npm start
+HOST=0.0.0.0 PORT=8787 npm start
 ```
 
 另开窗口确认还活着：
@@ -85,7 +86,7 @@ curl http://127.0.0.1:8787/health
 **终端 2 — 安装插件并启动 DSH（默认 `127.0.0.1:3080`）**
 
 ```bash
-npx @deepseek-ai/dsh plugin --profile web add "github:yukiykchen/dsh-scan-remote#v0.0.1"
+npx @deepseek-ai/dsh plugin --profile web add "github:qingfeng19491001/dsh-scan-remote"
 
 ipconfig getifaddr en0    # macOS Wi-Fi；Linux 用 ip addr / hostname -I
 export PUBLIC_RELAY_URL=http://192.168.1.10:8787   # 换成上一步的电脑 LAN IP，手机必须能打开
@@ -101,7 +102,7 @@ Android 试用包从 [GitHub Releases](https://github.com/yukiykchen/deepseek-ha
 也可以自己编：
 
 ```bash
-git clone https://github.com/yukiykchen/deepseek-harness-mobile.git
+git clone https://github.com/qingfeng19491001/deepseek-harness-mobile.git
 cd deepseek-harness-mobile
 ./gradlew :androidApp:installDebug
 ```
@@ -189,14 +190,14 @@ targetSdk  = 28
 ## 获取源码
 
 ```bash
-git clone git@github.com:yukiykchen/deepseek-harness-mobile.git
+git clone git@github.com:qingfeng19491001/deepseek-harness-mobile.git
 cd deepseek-harness-mobile
 ```
 
 如果使用 HTTPS：
 
 ```bash
-git clone https://github.com/yukiykchen/deepseek-harness-mobile.git
+git clone https://github.com/qingfeng19491001/deepseek-harness-mobile.git
 cd deepseek-harness-mobile
 ```
 
@@ -213,7 +214,7 @@ cd deepseek-harness-mobile
 
 ## 通过扫码连接电脑上的 DSH Host
 
-扫码模式走 [dsh-scan-remote](https://github.com/yukiykchen/dsh-scan-remote) 插件和本机 Relay。电脑上的 Harness 仍只监听 `127.0.0.1:3080`；手机和插件都出站连 Relay。更细的协议说明见[插件中文 README](https://github.com/yukiykchen/dsh-scan-remote/blob/master/README.zh-CN.md)。
+扫码模式走 [dsh-scan-remote](https://github.com/qingfeng19491001/dsh-scan-remote) 插件和本机 Relay。电脑上的 Harness 仍只监听 `127.0.0.1:3080`；手机和插件都出站连 Relay。更细的协议说明见[插件中文 README](https://github.com/qingfeng19491001/dsh-scan-remote/blob/master/README.zh-CN.md)。
 
 两件不要混：
 
@@ -227,7 +228,7 @@ cd deepseek-harness-mobile
 Relay 在插件仓库的 `relay/` 目录，没有单独的安装包。先克隆仓库：
 
 ```bash
-git clone https://github.com/yukiykchen/dsh-scan-remote.git
+git clone https://github.com/qingfeng19491001/dsh-scan-remote.git
 cd dsh-scan-remote/relay
 ```
 
@@ -237,7 +238,7 @@ cd dsh-scan-remote/relay
 cp .env.example .env
 npm ci
 npm run build
-HOST=127.0.0.1 PORT=8787 npm start
+HOST=0.0.0.0 PORT=8787 npm start
 ```
 
 或用 Docker（仍在 `relay/` 目录）：
@@ -259,10 +260,12 @@ Relay 要一直开着。关掉后手机扫码和隧道都会断。
 另开一个终端（Relay 那个窗口不要停）：
 
 ```bash
-npx @deepseek-ai/dsh plugin --profile web add "github:yukiykchen/dsh-scan-remote#v0.0.1"
+npx @deepseek-ai/dsh plugin --profile web add "github:qingfeng19491001/dsh-scan-remote"
 ```
 
 如果已经装过，可以跳过这一步。Settings 里没有 **Remote Access** 时，多半是插件没装到 `web` profile，或 Host 不是用这个 profile 启动的。
+
+同一套插件还提供会话恢复与永久删除。装好后重启 `dsh web`，手机侧栏会话管理里的「恢复」「删除」才会可用。
 
 可选：再装配套管理插件，手机侧栏「插件」才能看到配置摘要、失败原因，并安全启用 / 停用 / 重载（官方 `pluginInventory/list` 仍然只读）：
 
@@ -416,7 +419,7 @@ ohosApp/                             # OpenHarmony 宿主工程
 1. 电脑和手机是否在同一可互通网段，而不是只「看起来连了 Wi-Fi」；
 2. 二维码 / `publicRelayUrl` 是否仍是上一张网的 IP；
 3. 改完配置后是否重启了 `dsh web`，以及是否重新扫了新码；
-4. 电脑上 Relay 是否还在 `8787` 监听；
+4. 电脑上 Relay 是否还在 `8787` 监听（局域网扫码用 `HOST=0.0.0.0`）；
 5. 电脑防火墙是否拦截了来自手机的 `8787`。
 
 ### API Key 配置成功但无法回答
