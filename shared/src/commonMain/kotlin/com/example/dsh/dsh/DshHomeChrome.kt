@@ -2,7 +2,10 @@ package com.example.dsh.dsh
 
 import com.example.dsh.theme.tokens
 import com.tencent.kuikly.core.base.*
+import com.tencent.kuikly.core.base.attr.CaptureRule
+import com.tencent.kuikly.core.base.attr.CaptureRuleDirection
 import com.tencent.kuikly.core.base.attr.ImageUri
+import com.tencent.kuikly.core.base.event.PanGestureParams
 import com.tencent.kuikly.core.directives.vif
 import com.tencent.kuikly.core.directives.velse
 import com.tencent.kuikly.core.directives.vfor
@@ -285,7 +288,6 @@ internal fun ViewContainer<*, *>.DshSessionDrawer(
     archivedSessions: () -> ObservableList<DshSession>,
     isWebTimeline: () -> Boolean,
     activeId: () -> String,
-    animated: () -> Boolean,
     onClose: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenAppearance: () -> Unit,
@@ -297,26 +299,20 @@ internal fun ViewContainer<*, *>.DshSessionDrawer(
     onSort: (DshSessionSort) -> Unit,
     onManage: (String) -> Unit,
     onSelect: (String) -> Unit,
+    onPan: (PanGestureParams) -> Unit = {},
 ) {
-    Modal(inWindow = true) {
+    View {
         attr {
-            absolutePositionAllZero()
-            flexDirectionRow()
-            backgroundColor(Color.TRANSPARENT)
+            flex(1f)
+            flexDirectionColumn()
+            paddingTop(pagerData.statusBarHeight + 10f)
+            paddingLeft(14f)
+            paddingRight(14f)
+            paddingBottom(18f)
+            backgroundColor(tokens.background)
+            capture(CaptureRule.pan(CaptureRuleDirection.HORIZONTAL))
         }
-        View {
-            attr {
-                width((pagerData.pageViewWidth - 44f).coerceAtMost(340f))
-                height(pagerData.pageViewHeight)
-                flexDirectionColumn()
-                paddingTop(pagerData.statusBarHeight + 10f)
-                paddingLeft(14f)
-                paddingRight(14f)
-                paddingBottom(18f)
-                backgroundColor(tokens.background)
-                transform(Translate(if (animated()) 0f else -1f, 0f))
-                animation(Animation.easeOut(0.24f), animated())
-            }
+        event { dshFollowPan(onPan) }
             View {
                 attr {
                     height(48f)
@@ -519,14 +515,6 @@ internal fun ViewContainer<*, *>.DshSessionDrawer(
                 }
             }
         }
-        View {
-            attr {
-                flex(1f)
-                height(pagerData.pageViewHeight)
-            }
-            event { click { onClose() } }
-        }
-    }
 }
 
 internal fun ViewContainer<*, *>.DshSessionSortChip(
@@ -765,7 +753,6 @@ internal fun ViewContainer<*, *>.DshTopBar(
             paddingLeft(12f)
             paddingRight(14f)
             backgroundColor(tokens.surface)
-            borderBottom(Border(1f, BorderStyle.SOLID, tokens.divider))
         }
         vif({ selectMode() }) {
             Text {

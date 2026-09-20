@@ -181,11 +181,13 @@ class KuiklyRenderActivity : AppCompatActivity(), KuiklyRenderViewBaseDelegatorD
     private fun setupImmersiveMode() {
         window?.apply {
             addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
+            // 系统栏透明，图标深浅由 DshThemeChrome.apply 决定；页面自己铺到状态栏下方。
             statusBarColor = Color.TRANSPARENT
-            // 状态栏图标深浅由 DshThemeChrome.apply 按主题决定，这里只保留布局相关 flag。
+            navigationBarColor = Color.TRANSPARENT
             decorView.systemUiVisibility = decorView.systemUiVisibility or
                 View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
         }
+        applyThemeChrome(currentIsDark, forceContainers = true)
     }
 
     companion object {

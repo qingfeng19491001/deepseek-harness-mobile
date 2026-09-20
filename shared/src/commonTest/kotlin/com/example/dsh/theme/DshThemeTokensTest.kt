@@ -62,6 +62,10 @@ class DshThemeTokensTest {
         }
         assertEquals(DshChromePalette.LIGHT_BACKGROUND, light.background.hexColor)
         assertEquals(DshChromePalette.DARK_BACKGROUND, dark.background.hexColor)
+        assertEquals(DshChromePalette.LIGHT_SURFACE, light.surface.hexColor)
+        assertEquals(DshChromePalette.DARK_SURFACE, dark.surface.hexColor)
+        assertEquals(DshChromePalette.LIGHT_SURFACE, light.surface.hexColor)
+        assertEquals(DshChromePalette.DARK_SURFACE, dark.surface.hexColor)
         assertEquals(DshChromePalette.LIGHT_BAR_CONTENT, light.primaryText.hexColor)
         assertEquals(DshChromePalette.DARK_BAR_CONTENT, dark.primaryText.hexColor)
         listOf("light" to DshCodeColors.LIGHT, "dark" to DshCodeColors.DARK).forEach { (scheme, c) ->

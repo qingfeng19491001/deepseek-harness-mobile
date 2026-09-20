@@ -29,7 +29,7 @@ final class DshThemeChrome: NSObject {
     }
 
     @objc static func backgroundColor(_ isDark: Bool) -> UIColor {
-        color(argb: isDark ? DshChromePalette.shared.DARK_BACKGROUND : DshChromePalette.shared.LIGHT_BACKGROUND)
+        color(argb: isDark ? DshChromePalette.shared.DARK_SURFACE : DshChromePalette.shared.LIGHT_SURFACE)
     }
 
     @objc static func statusBarStyle(_ isDark: Bool) -> UIStatusBarStyle {

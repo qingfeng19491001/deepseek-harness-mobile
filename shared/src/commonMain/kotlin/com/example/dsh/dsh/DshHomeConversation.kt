@@ -431,16 +431,24 @@ internal fun ViewContainer<*, *>.DshConversation(
         vif({ !selectMode() }) {
             View {
                 attr {
+                    width(availableWidth)
+                    flexDirectionColumn()
+                    paddingLeft(12f)
+                    paddingRight(12f)
+                    paddingTop(4f)
+                    paddingBottom(10f)
+                    backgroundColor(tokens.surface)
+                }
+                View {
+                attr {
                     height(
                         COMPOSER_HEIGHT +
                             if (draftImages().isNotEmpty()) DRAFT_THUMB_SIZE + 16f else 0f,
                     )
-                    width(availableWidth)
                     flexDirectionColumn()
-                    padding(12f, 14f, 12f, 14f)
-                    backgroundColor(tokens.surface)
-                    borderRadius(22f)
-                    border(Border(1f, BorderStyle.SOLID, tokens.divider))
+                    padding(12f, 14f, 10f, 14f)
+                    backgroundColor(tokens.surfaceVariant)
+                    borderRadius(28f)
                     opacity(if (theme.revision >= 0) 1f else 1f)
                 }
                 vif({
@@ -498,16 +506,14 @@ internal fun ViewContainer<*, *>.DshConversation(
             Input {
                 ref { inputRef(it) }
                 attr {
-                    height(58f)
+                    height(40f)
                     backgroundColor(Color.TRANSPARENT)
-                    fontSize(15f)
+                    fontSize(16f)
                     color(tokens.primaryText)
                     placeholder(
                         when {
                             voiceActive() -> "正在聆听..."
-                            isBlankConversation() &&
-                                messagesForSession(activeConversationId()).isEmpty() -> "描述你想要构建的内容"
-                            else -> "请输入您的问题..."
+                            else -> "发消息或按住说话"
                         },
                     )
                     placeholderColor(tokens.tertiaryText)
@@ -528,34 +534,36 @@ internal fun ViewContainer<*, *>.DshConversation(
 
             View {
                 attr {
-                    height(48f)
+                    height(36f)
+                    marginTop(8f)
                     flexDirectionRow()
                     alignItemsCenter()
                 }
                 View {
                     attr {
                         width(184f)
-                        height(40f)
+                        height(32f)
                         flexDirectionRow()
                         alignItemsCenter()
                         paddingLeft(12f)
                         paddingRight(9f)
-                        borderRadius(20f)
+                        borderRadius(16f)
                         border(Border(1f, BorderStyle.SOLID, tokens.divider))
+                        backgroundColor(tokens.surface)
                     }
                     Text {
                         attr {
                             text(modelLabel())
                             flex(1f)
                             lines(1)
-                            fontSize(14f)
+                            fontSize(13f)
                             color(tokens.primaryText)
                         }
                     }
                     Image {
                         attr {
                             src(ImageUri.commonAssets("chevron-down.svg"))
-                            size(18f, 18f)
+                            size(16f, 16f)
                             tintColor(tokens.icon)
                         }
                     }
@@ -563,21 +571,39 @@ internal fun ViewContainer<*, *>.DshConversation(
                 }
                 View { attr { flex(1f) } }
                 View {
-                    attr { size(40f, 40f); allCenter() }
-                    Image { attr { src(ImageUri.commonAssets("plus.svg")); size(22f, 22f); tintColor(tokens.icon) } }
+                    attr {
+                        size(36f, 36f)
+                        allCenter()
+                        borderRadius(18f)
+                        border(Border(1f, BorderStyle.SOLID, tokens.divider))
+                        backgroundColor(tokens.surface)
+                    }
+                    Image { attr { src(ImageUri.commonAssets("plus.svg")); size(18f, 18f); tintColor(tokens.icon) } }
                     DshHitButton(onToggleAttachments)
                 }
                 View {
                     attr {
-                        size(48f, 48f)
-                        marginLeft(6f)
-                        borderRadius(24f)
+                        size(36f, 36f)
+                        marginLeft(8f)
+                        borderRadius(18f)
                         allCenter()
+                        border(
+                            Border(
+                                1f,
+                                BorderStyle.SOLID,
+                                if (stopButtonVisible() || draft().isNotEmpty() || draftImages().isNotEmpty() || voiceActive()) {
+                                    Color.TRANSPARENT
+                                } else {
+                                    tokens.divider
+                                },
+                            ),
+                        )
                         backgroundColor(
                             when {
                                 stopButtonVisible() -> tokens.error.foreground
                                 voiceActive() -> tokens.info.foreground
-                                else -> tokens.primary
+                                draft().isNotEmpty() || draftImages().isNotEmpty() -> tokens.primary
+                                else -> tokens.surface
                             },
                         )
                     }
@@ -585,7 +611,7 @@ internal fun ViewContainer<*, *>.DshConversation(
                         Image {
                             attr {
                                 src(ImageUri.commonAssets("square.svg"))
-                                size(23f, 23f)
+                                size(18f, 18f)
                                 tintColor(tokens.onPrimary)
                             }
                         }
@@ -594,8 +620,14 @@ internal fun ViewContainer<*, *>.DshConversation(
                     Image {
                         attr {
                             src(ImageUri.commonAssets(if (draft().isEmpty() && draftImages().isEmpty()) "mic.svg" else "send.svg"))
-                            size(23f, 23f)
-                            tintColor(tokens.onPrimary)
+                            size(18f, 18f)
+                            tintColor(
+                                if (draft().isEmpty() && draftImages().isEmpty() && !voiceActive()) {
+                                    tokens.icon
+                                } else {
+                                    tokens.onPrimary
+                                },
+                            )
                         }
                     }
                     }
@@ -607,6 +639,7 @@ internal fun ViewContainer<*, *>.DshConversation(
                             }
                     }
                 }
+            }
             }
             }
         }

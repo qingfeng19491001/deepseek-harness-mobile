@@ -10,8 +10,10 @@ const PREF_KEY = 'theme_preference';
 const PREF_FILE = 'KRSharedPreferencesModule';
 const EVENT_THEME_DID_CHANGED = 'themeDidChanged';
 // ARGB copies of DshChromePalette (Kotlin cannot be imported from ArkTS).
-const LIGHT_BG = '#FFF5F6F7';
+const LIGHT_BG = '#FFFAFAFA';
 const DARK_BG = '#FF151517';
+const LIGHT_SURFACE = '#FFFFFFFF';
+const DARK_SURFACE = '#FF232324';
 const LIGHT_BAR_CONTENT = '#FF0F1115';
 const DARK_BAR_CONTENT = '#FFF9FAFB';
 
@@ -59,15 +61,16 @@ export class DshThemeChrome {
     }
     DshThemeChrome.lastAppliedIsDark = isDark;
     const bg = isDark ? DARK_BG : LIGHT_BG;
+    const surface = isDark ? DARK_SURFACE : LIGHT_SURFACE;
     const barContent = isDark ? DARK_BAR_CONTENT : LIGHT_BAR_CONTENT;
     try {
-      win.setWindowBackgroundColor(bg);
+      win.setWindowBackgroundColor(surface);
     } catch (e) {
       console.error(`DshThemeChrome setWindowBackgroundColor failed: ${(e as BusinessError).message}`);
     }
     win.setWindowSystemBarProperties({
-      statusBarColor: bg,
-      navigationBarColor: bg,
+      statusBarColor: '#00000000',
+      navigationBarColor: '#00000000',
       statusBarContentColor: barContent,
       navigationBarContentColor: barContent,
     }).catch((e: BusinessError) => {

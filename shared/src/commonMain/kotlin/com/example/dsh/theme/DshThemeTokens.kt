@@ -42,8 +42,8 @@ internal data class DshThemeTokens(
     companion object {
         val LIGHT = DshThemeTokens(
             background = Color(DshChromePalette.LIGHT_BACKGROUND),
-            surface = Color(0xFFFFFFFFL),
-            surfaceVariant = Color(0xFFF1F3F5L),
+            surface = Color(DshChromePalette.LIGHT_SURFACE),
+            surfaceVariant = Color(0xFFF5F5F5L),
             surfaceElevated = Color(0xFFFFFFFFL),
             selectedSurface = Color(0xFFE4EDFDL),
             primaryText = Color(DshChromePalette.LIGHT_BAR_CONTENT),
@@ -65,12 +65,12 @@ internal data class DshThemeTokens(
             error = DshStateColors(Color(0xFFFDEBECL), Color(0xFFBF3535L)),
             info = DshStateColors(Color(0xFFEEF3FAL), Color(0xFF2F5FC4L)),
             running = DshStateColors(Color(0xFFEEF3FAL), Color(0xFF3556D9L)),
-            disabled = DshStateColors(Color(0xFFF1F3F5L), Color(0xFF666B71L)),
+            disabled = DshStateColors(Color(0xFFF5F5F5L), Color(0xFF666B71L)),
         )
 
         val DARK = DshThemeTokens(
             background = Color(DshChromePalette.DARK_BACKGROUND),
-            surface = Color(0xFF232324L),
+            surface = Color(DshChromePalette.DARK_SURFACE),
             surfaceVariant = Color(0xFF2C2C2EL),
             surfaceElevated = Color(0xFF353638L),
             selectedSurface = Color(0xFF1C2D49L),

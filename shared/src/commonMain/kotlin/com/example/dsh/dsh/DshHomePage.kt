@@ -6,6 +6,9 @@ import com.example.dsh.theme.theme
 import com.example.dsh.theme.tokens
 import com.tencent.kuikly.core.annotations.Page
 import com.tencent.kuikly.core.base.*
+import com.tencent.kuikly.core.base.attr.CaptureRule
+import com.tencent.kuikly.core.base.attr.CaptureRuleDirection
+import com.tencent.kuikly.core.base.event.PanGestureParams
 import com.tencent.kuikly.core.directives.scrollToPosition
 import com.tencent.kuikly.core.directives.vif
 import com.tencent.kuikly.core.log.KLog
@@ -31,6 +34,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlin.math.abs
 import kotlin.time.TimeMark
 import kotlin.time.TimeSource
 
@@ -135,10 +139,24 @@ internal class DshHomePage : BasePager() {
     private var credentialSetupBusy by observable(false)
     private var credentialSetupError by observable("")
     private var credentialSetupTitle by observable("添加一个 API Key 开始使用")
+    private var sessionDrawerProgress by observable(0f)
+    private var sessionDrawerDragging by observable(false)
+    private var sessionDrawerSettling by observable(false)
     private var sessionDrawerVisible by observable(false)
-    private var sessionDrawerAnimated by observable(false)
-    private var sessionDrawerMaskAnimated by observable(false)
-    private var sessionDrawerMaskAnimation by observable(Animation.linear(0f))
+    private var drawerPanSource by observable(0)
+    private var suppressDrawerClick by observable(false)
+    private var drawerMotionGeneration = 0
+    private var drawerTargetProgress = 0f
+    private var drawerPanStartX = 0f
+    private var drawerPanStartY = 0f
+    private var drawerPanStartProgress = 0f
+    private var drawerPanResumeTarget = 0f
+    private var drawerPanLastX = 0f
+    private var drawerPanLastTime = 0L
+    private var drawerPanVelocityX = 0f
+    private var drawerPanLocked = false
+    private var drawerClickGeneration = 0
+    private val drawerClockOrigin = TimeSource.Monotonic.markNow()
     private var modelPickerVisible by observable(false)
     private var modelPickerBusy by observable(false)
     private var modelPickerError by observable("")
@@ -272,6 +290,7 @@ internal class DshHomePage : BasePager() {
     }
 
     override fun pageWillDestroy() {
+        drawerMotionGeneration++
         stopCurrentEngine()
         localReadScope.cancel()
         super.pageWillDestroy()
@@ -285,18 +304,50 @@ internal class DshHomePage : BasePager() {
             View {
                 attr {
                     flex(1f)
-                    flexDirectionColumn()
+                    overflow(true)
                     autoDarkEnable(false)
                     backgroundColor(tokens.background)
-                    paddingTop(pagerData.statusBarHeight)
                     opacity(if (theme.revision >= 0) 1f else 1f)
                 }
 
+                    View {
+                    attr {
+                        val progress = ctx.sessionDrawerProgress.coerceIn(0f, 1f)
+                        val pageWidth = pagerData.pageViewWidth
+                        val drawerWidth = DshDrawerMotion.drawerWidth(pageWidth)
+                        absolutePositionAllZero()
+                        flexDirectionColumn()
+                        paddingTop(pagerData.statusBarHeight)
+                        backgroundColor(tokens.surface)
+                        overflow(true)
+                        zIndex(2, useOutline = false)
+                        borderRadius(DshDrawerMotion.HOME_MAX_RADIUS * progress)
+                        transform(
+                            scale = Scale(
+                                DshDrawerMotion.homeScale(progress),
+                                DshDrawerMotion.homeScale(progress),
+                            ),
+                            translate = Translate(
+                                0f,
+                                0f,
+                                DshDrawerMotion.homeShift(progress, pageWidth, drawerWidth),
+                                0f,
+                            ),
+                        )
+                        capture(CaptureRule.pan(CaptureRuleDirection.HORIZONTAL))
+                        touchEnable(progress == 0f || ctx.drawerPanSource == DshDrawerMotion.PAN_SOURCE_HOME)
+                    }
+                    event { dshFollowPan { ctx.handleHomeSwipe(it) } }
+                    View {
+                        attr {
+                            flex(1f)
+                            flexDirectionColumn()
+                            opacity(1f - DshDrawerMotion.SCRIM_ALPHA * ctx.sessionDrawerProgress.coerceIn(0f, 1f))
+                        }
                 View {
                     ref { ctx.topBarRef = it }
                     attr {
                         height(58f)
-                        zIndex(3)
                     }
                     DshTopBar(
                         title = { ctx.sessions.firstOrNull { it.id == ctx.activeSessionId }?.title ?: "DeepSeek Harness" },
@@ -322,17 +373,6 @@ internal class DshHomePage : BasePager() {
                     attr {
                         flex(1f)
                         flexDirectionColumn()
-                        // Push the conversation with the drawer, leaving the
-                        // dimmed right edge visible like the reference UI.
-                        transform(Translate(
-                            0f,
-                            offsetX = if (ctx.sessionDrawerAnimated) {
-                                (pagerData.pageViewWidth - 44f).coerceAtMost(340f)
-                            } else {
-                                0f
-                            },
-                        ))
-                        animation(Animation.easeOut(ANIMATION_DURATION_S), ctx.sessionDrawerAnimated)
                     }
                     if (wide) {
                         ctx.perfLog("body.conversation.begin wide=true panels=${ctx.conversationPanelIds.size}")
@@ -591,29 +631,63 @@ internal class DshHomePage : BasePager() {
                         )
                         ctx.perfLog("body.conversation.end wide=false")
                     }
+                    }
+                    }
+                    }
 
-                    vif({ ctx.sessionDrawerVisible }) {
-                        View {
-                            attr {
-                                absolutePositionAllZero()
-                                backgroundColor(tokens.scrim)
-                                opacity(if (ctx.sessionDrawerMaskAnimated) 1f else 0f)
-                                animation(ctx.sessionDrawerMaskAnimation, ctx.sessionDrawerMaskAnimated)
-                            }
-                            event { click { ctx.closeSessionDrawer() } }
-                        }
+                View {
+                    attr {
+                        val progress = ctx.sessionDrawerProgress.coerceIn(0f, 1f)
+                        val pageWidth = pagerData.pageViewWidth
+                        val drawerWidth = DshDrawerMotion.drawerWidth(pageWidth)
+                        absolutePositionAllZero()
+                        transform(
+                            scale = Scale(
+                                DshDrawerMotion.homeScale(progress),
+                                DshDrawerMotion.homeScale(progress),
+                            ),
+                            translate = Translate(
+                                0f,
+                                0f,
+                                DshDrawerMotion.homeShift(progress, pageWidth, drawerWidth),
+                                0f,
+                            ),
+                        )
+                        backgroundColor(Color.TRANSPARENT)
+                        touchEnable(
+                            (progress > 0f || ctx.sessionDrawerSettling) &&
+                                ctx.drawerPanSource != DshDrawerMotion.PAN_SOURCE_HOME,
+                        )
+                        capture(CaptureRule.pan(CaptureRuleDirection.HORIZONTAL))
+                        zIndex(3, useOutline = false)
+                    }
+                    event {
+                        click { if (!ctx.suppressDrawerClick) ctx.closeSessionDrawer() }
+                        dshFollowPan { ctx.handleCloseSwipe(it) }
                     }
                 }
 
-                vif({ ctx.sessionDrawerVisible }) {
+                View {
+                    attr {
+                        val progress = ctx.sessionDrawerProgress.coerceIn(0f, 1f)
+                        val drawerWidth = DshDrawerMotion.drawerWidth(pagerData.pageViewWidth)
+                        absolutePosition(left = 0f, top = 0f, bottom = 0f)
+                        width(drawerWidth)
+                        transform(Translate(0f, 0f, DshDrawerMotion.drawerShift(progress, drawerWidth), 0f))
+                        backgroundColor(tokens.background)
+                        overflow(true)
+                        touchEnable(progress > 0f && ctx.drawerPanSource != DshDrawerMotion.PAN_SOURCE_HOME)
+                        capture(CaptureRule.pan(CaptureRuleDirection.HORIZONTAL))
+                        zIndex(1, useOutline = false)
+                    }
+                    event { dshFollowPan { ctx.handleCloseSwipe(it) } }
                     DshSessionDrawer(
                         sessions = { ctx.visibleSessions },
                         workspaceGroups = { ctx.workspaceGroups },
                         archivedSessions = { ctx.archivedSessions },
                         isWebTimeline = { ctx.isRemoteHost },
                         activeId = { ctx.activeSessionId },
-                        animated = { ctx.sessionDrawerAnimated },
-                        onClose = { ctx.closeSessionDrawer() },
+                        onClose = { if (!ctx.suppressDrawerClick) ctx.closeSessionDrawer() },
                         onOpenSettings = { ctx.openConnectionSettings() },
                         onOpenAppearance = { ctx.appearanceVisible = true },
                         onOpenPlugins = { ctx.openPluginMenu() },
@@ -624,11 +698,14 @@ internal class DshHomePage : BasePager() {
                         onSort = { ctx.applySessionSort(it) },
                         onManage = { ctx.openSessionManage(it) },
                         onSelect = { id ->
-                            ctx.closeSessionDrawer()
-                            setTimeout(ctx.pagerId, 0) {
-                                ctx.selectSession(id)
+                            if (!ctx.suppressDrawerClick) {
+                                ctx.closeSessionDrawer()
+                                setTimeout(ctx.pagerId, 0) {
+                                    ctx.selectSession(id)
+                                }
                             }
                         },
+                        onPan = { ctx.handleCloseSwipe(it) },
                     )
                 }
 
@@ -1022,30 +1099,125 @@ internal class DshHomePage : BasePager() {
         }
     }
 
+    private fun drawerNow(): Long = drawerClockOrigin.elapsedNow().inWholeMilliseconds
+
+    private fun syncDrawerVisible() {
+        sessionDrawerVisible = sessionDrawerProgress > 0.001f ||
+            sessionDrawerSettling ||
+            sessionDrawerDragging ||
+            drawerTargetProgress == 1f
+    }
+
     private fun openSessionDrawer() {
-        if (sessionDrawerVisible) return
-        // Mount transparent first, then start drawer and mask on the same frame.
-        sessionDrawerMaskAnimation = Animation.easeInOut(0.24f)
-        sessionDrawerMaskAnimated = false
-        sessionDrawerAnimated = false
-        sessionDrawerVisible = true
-        setTimeout(pagerId, 16) {
-            sessionDrawerAnimated = true
-            sessionDrawerMaskAnimated = true
-        }
-        setTimeout(pagerId, ANIMATION_DURATION_MS) {
-            warmRecentSessionCache(scrollToEndAfterLoad = false)
-        }
+        dismissKeyboard()
+        settleSessionDrawer(1f)
+        warmRecentSessionCache(scrollToEndAfterLoad = false)
     }
 
     private fun closeSessionDrawer() {
-        if (!sessionDrawerVisible) return
-        // Reverse the opening transition: fade the mask out while the drawer closes.
-        sessionDrawerMaskAnimation = Animation.easeInOut(ANIMATION_DURATION_S)
-        sessionDrawerMaskAnimated = false
-        sessionDrawerAnimated = false
-        setTimeout(pagerId, ANIMATION_DURATION_MS) {
-            sessionDrawerVisible = false
+        settleSessionDrawer(0f)
+    }
+
+    private fun settleSessionDrawer(target: Float) {
+        if (sessionDrawerSettling && drawerTargetProgress == target && !sessionDrawerDragging) return
+        val generation = ++drawerMotionGeneration
+        drawerTargetProgress = target
+        sessionDrawerDragging = false
+        drawerPanSource = 0
+        val from = sessionDrawerProgress
+        sessionDrawerSettling = abs(from - target) > 0.0001f
+        syncDrawerVisible()
+        if (!sessionDrawerSettling) {
+            sessionDrawerProgress = target
+            syncDrawerVisible()
+            return
+        }
+        val started = drawerNow()
+        fun frame() {
+            if (generation != drawerMotionGeneration) return
+            val time = ((drawerNow() - started) / DshDrawerMotion.SETTLE_MS).coerceIn(0f, 1f)
+            sessionDrawerProgress = from + (target - from) * DshDrawerPhysics.ease(time)
+            if (time < 1f) {
+                setTimeout(pagerId, 16) { frame() }
+            } else {
+                sessionDrawerProgress = target
+                sessionDrawerSettling = false
+                syncDrawerVisible()
+            }
+        }
+        setTimeout(pagerId, 16) { frame() }
+    }
+
+    private fun handleHomeSwipe(params: PanGestureParams) =
+        handleDrawerPan(params, DshDrawerMotion.PAN_SOURCE_HOME)
+
+    private fun handleCloseSwipe(params: PanGestureParams) =
+        handleDrawerPan(params, DshDrawerMotion.PAN_SOURCE_CLOSE)
+
+    private fun handleDrawerPan(params: PanGestureParams, source: Int) {
+        when (params.state) {
+            "start" -> {
+                if (drawerPanSource != 0) return
+                if (source == DshDrawerMotion.PAN_SOURCE_HOME && sessionDrawerProgress > 0f) return
+                drawerPanResumeTarget = drawerTargetProgress
+                ++drawerMotionGeneration
+                sessionDrawerSettling = false
+                drawerPanSource = source
+                drawerPanStartX = params.pageX
+                drawerPanStartY = params.pageY
+                drawerPanStartProgress = sessionDrawerProgress
+                drawerPanLastX = params.pageX
+                drawerPanLastTime = drawerNow()
+                drawerPanVelocityX = 0f
+                drawerPanLocked = false
+                suppressDrawerClick = false
+                ++drawerClickGeneration
+            }
+            "move" -> {
+                if (drawerPanSource != source) return
+                val dx = params.pageX - drawerPanStartX
+                val dy = params.pageY - drawerPanStartY
+                if (!drawerPanLocked) {
+                    if (maxOf(abs(dx), abs(dy)) < DshDrawerMotion.PAN_LOCK_SLOP) return
+                    if (abs(dy) >= abs(dx)) {
+                        settleSessionDrawer(drawerPanResumeTarget)
+                        return
+                    }
+                    if (source == DshDrawerMotion.PAN_SOURCE_HOME && dx <= 0f) return
+                    drawerPanLocked = true
+                    sessionDrawerDragging = true
+                    suppressDrawerClick = true
+                    dismissKeyboard()
+                    syncDrawerVisible()
+                }
+                val now = drawerNow()
+                val dt = now - drawerPanLastTime
+                if (dt > 0) {
+                    drawerPanVelocityX = (params.pageX - drawerPanLastX) / dt * 1000f
+                    drawerPanLastX = params.pageX
+                    drawerPanLastTime = now
+                }
+                sessionDrawerProgress = DshDrawerPhysics.progress(
+                    drawerPanStartProgress,
+                    dx,
+                    DshDrawerMotion.drawerWidth(pagerData.pageViewWidth),
+                )
+            }
+            "end", "cancel" -> {
+                if (drawerPanSource != source) return
+                val locked = drawerPanLocked
+                val velocity = if (drawerNow() - drawerPanLastTime > 100L) 0f else drawerPanVelocityX
+                val target = if (params.state == "cancel" || !locked) drawerPanResumeTarget
+                else DshDrawerPhysics.target(sessionDrawerProgress, velocity)
+                drawerPanLocked = false
+                settleSessionDrawer(target)
+                if (locked) {
+                    val token = ++drawerClickGeneration
+                    setTimeout(pagerId, 100) {
+                        if (token == drawerClickGeneration) suppressDrawerClick = false
+                    }
+                }
+            }
         }
     }
 

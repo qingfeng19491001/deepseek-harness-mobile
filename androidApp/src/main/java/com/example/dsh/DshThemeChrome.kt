@@ -5,6 +5,7 @@ import com.example.dsh.theme.DshThemePreference
 import android.app.Activity
 import android.content.Context
 import android.content.res.Configuration
+import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.os.Build
 import android.view.View
@@ -24,8 +25,8 @@ object DshThemeChrome {
     const val IS_NIGHT_MODE_KEY = "isNightMode"
     const val THEME_DID_CHANGED = "themeDidChanged"
 
-    /** 与 [DshChromePalette] / `DshThemeTokens.background` 同源。 */
-    fun backgroundColor(isDark: Boolean): Int = DshChromePalette.backgroundArgb(isDark)
+    /** 窗口首帧底色。系统栏保持透明，由页面顶/底相接区域自己铺色。 */
+    fun backgroundColor(isDark: Boolean): Int = DshChromePalette.surfaceArgb(isDark)
 
     fun systemIsDark(context: Context): Boolean =
         (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
@@ -61,13 +62,13 @@ object DshThemeChrome {
         }
     }
 
-    /** 刷新窗口背景、状态栏图标风格以及传入的容器视图背景。 */
+    /** 刷新窗口背景与状态栏图标。系统栏透明，底色由 Kuikly 顶/底相接区域绘制。 */
     fun apply(activity: Activity, isDark: Boolean, vararg containers: View?) {
         val window = activity.window ?: return
         val bg = backgroundColor(isDark)
         window.setBackgroundDrawable(ColorDrawable(bg))
-        window.statusBarColor = bg
-        window.navigationBarColor = bg
+        window.statusBarColor = Color.TRANSPARENT
+        window.navigationBarColor = Color.TRANSPARENT
         containers.forEach { it?.setBackgroundColor(bg) }
 
         val decor = window.decorView
