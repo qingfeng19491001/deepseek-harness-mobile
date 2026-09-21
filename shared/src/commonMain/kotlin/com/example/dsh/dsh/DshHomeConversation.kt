@@ -12,9 +12,9 @@ import com.tencent.kuikly.core.directives.vforLazy
 import com.tencent.kuikly.core.layout.FlexAlign
 import com.tencent.kuikly.core.reactive.collection.ObservableList
 import com.tencent.kuikly.core.views.Image
-import com.tencent.kuikly.core.views.Input
-import com.tencent.kuikly.core.views.InputView
 import com.tencent.kuikly.core.views.KeyboardParams
+import com.tencent.kuikly.core.views.TextArea
+import com.tencent.kuikly.core.views.TextAreaView
 import com.tencent.kuikly.core.views.List
 import com.tencent.kuikly.core.views.ListView
 import com.tencent.kuikly.core.views.ScrollParams
@@ -136,7 +136,7 @@ internal fun ViewContainer<*, *>.DshConversation(
     keyboardHeight: () -> Float,
     stopButtonVisible: () -> Boolean,
     keyboardAnimation: () -> Animation,
-    inputRef: (com.tencent.kuikly.core.base.ViewRef<InputView>) -> Unit,
+    inputRef: (com.tencent.kuikly.core.base.ViewRef<TextAreaView>) -> Unit,
     onInputFocusChange: (Boolean) -> Unit,
     onDraftChange: (String) -> Unit,
     onKeyboardHeightChange: (KeyboardParams) -> Unit,
@@ -441,7 +441,7 @@ internal fun ViewContainer<*, *>.DshConversation(
                 }
                 View {
                 attr {
-                    height(
+                    minHeight(
                         COMPOSER_HEIGHT +
                             if (draftImages().isNotEmpty()) DRAFT_THUMB_SIZE + 16f else 0f,
                     )
@@ -503,10 +503,11 @@ internal fun ViewContainer<*, *>.DshConversation(
                 onRemove = onRemoveDraftImage,
                 onRetry = onRetryDraftImage,
             )
-            Input {
+            TextArea {
                 ref { inputRef(it) }
                 attr {
-                    height(40f)
+                    minHeight(40f)
+                    maxHeight(120f)
                     backgroundColor(Color.TRANSPARENT)
                     fontSize(16f)
                     color(tokens.primaryText)
@@ -517,7 +518,6 @@ internal fun ViewContainer<*, *>.DshConversation(
                         },
                     )
                     placeholderColor(tokens.tertiaryText)
-                    returnKeyTypeSend()
                     editable(!voiceActive())
                 }
                 event {
@@ -528,7 +528,6 @@ internal fun ViewContainer<*, *>.DshConversation(
                         onInputFocusChange(false)
                         onKeyboardHeightChange(KeyboardParams(0f, 0.24f))
                     }
-                    inputReturn { onSend() }
                 }
             }
 
