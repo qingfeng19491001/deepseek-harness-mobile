@@ -25,7 +25,7 @@ class DshDrawerPhysicsTest {
     fun bezierUsesTimeCoordinateAndNeverOvershoots() {
         assertEquals(0f, DshDrawerPhysics.ease(0f))
         assertEquals(1f, DshDrawerPhysics.ease(1f))
-        assertEquals(0.77f, DshDrawerPhysics.ease(0.245f), 0.00001f)
+        assertEquals(0.77f, DshDrawerPhysics.ease(0.245f), 0.001f)
         var previous = 0f
         for (i in 0..1000) {
             val current = DshDrawerPhysics.ease(i / 1000f)

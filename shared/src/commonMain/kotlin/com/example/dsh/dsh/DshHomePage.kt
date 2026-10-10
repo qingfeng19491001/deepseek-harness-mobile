@@ -15,9 +15,7 @@ import com.tencent.kuikly.core.log.KLog
 import com.tencent.kuikly.core.reactive.handler.observable
 import com.tencent.kuikly.core.reactive.handler.observableList
 import com.tencent.kuikly.core.reactive.collection.ObservableList
-import com.tencent.kuikly.core.views.Input
 import com.tencent.kuikly.core.views.InputView
-import com.tencent.kuikly.core.views.Modal
 import com.tencent.kuikly.core.views.Text
 import com.tencent.kuikly.core.views.TextAreaView
 import com.tencent.kuikly.core.views.View
@@ -102,12 +100,16 @@ internal class DshHomePage : BasePager() {
     private var draft by observable("")
     private var streaming by observable(false)
     private var stopButtonVisible by observable(false)
+
+    /** 本轮实时追加、尚未做过进场动画的消息 id；历史加载与重建不进这里。 */
+    private val freshMessageIds = mutableSetOf<String>()
     private var streamingAssistantContent by observable("")
     private var keyboardHeight by observable(0f)
     private var keyboardAnimation by observable(Animation.easeInOut(ANIMATION_DURATION_S))
     private var connectionLabel by observable("本地内核启动中")
     private var apiKeyDraft by observable("")
     private var credentialSetupVisible by observable(false)
+    private var appSettingsHubVisible by observable(false)
     private var appearanceVisible by observable(false)
     private var logCenterVisible by observable(false)
     private var logQuery by observable("")
@@ -322,7 +324,8 @@ internal class DshHomePage : BasePager() {
                         backgroundColor(tokens.surface)
                         overflow(true)
                         zIndex(2, useOutline = false)
-                        borderRadius(DshDrawerMotion.HOME_MAX_RADIUS * progress)
+                        // 圆角按 4dp 量化：整段动画只变 9 次，避免每帧重建裁剪 mask
+                        borderRadius((DshDrawerMotion.HOME_MAX_RADIUS * progress / 4f).toInt() * 4f)
                         transform(
                             scale = Scale(
                                 DshDrawerMotion.homeScale(progress),
@@ -343,7 +346,6 @@ internal class DshHomePage : BasePager() {
                         attr {
                             flex(1f)
                             flexDirectionColumn()
-                            opacity(1f - DshDrawerMotion.SCRIM_ALPHA * ctx.sessionDrawerProgress.coerceIn(0f, 1f))
                         }
                 View {
                     ref { ctx.topBarRef = it }
@@ -502,12 +504,12 @@ internal class DshHomePage : BasePager() {
                                 onQuestionSkip = { ctx.skipQuestion() },
                                 onSubmitQuestion = { ctx.submitQuestion() },
                                 availableWidth = centerWidth,
+                                consumeFreshMessage = { ctx.consumeFreshMessage(it) },
                             )
                             vif({ ctx.isRemoteHost }) {
                                 DshSessionDetailsPanel(
                                     title = { ctx.sessions.firstOrNull { it.id == ctx.activeSessionId }?.title ?: "尚无标题" },
                                     cwd = { ctx.sessions.firstOrNull { it.id == ctx.activeSessionId }?.cwd ?: "" },
-                                    modelLabel = { ctx.selectedModelLabel },
                                     agentPreset = { ctx.sessions.firstOrNull { it.id == ctx.activeSessionId }?.agentPreset.orEmpty() },
                                     running = { ctx.sessionRunning },
                                     queueCount = { ctx.queueItems.size },
@@ -521,6 +523,7 @@ internal class DshHomePage : BasePager() {
                                     onDelete = { ctx.openSessionDelete(ctx.activeSessionId) },
                                     onSelectMessages = { ctx.enterMessageSelect() },
                                     onExportSession = { ctx.exportActiveSessionHtml() },
+                                    modelLabel = { ctx.selectedModelLabel },
                                 )
                             }
                         }
@@ -629,97 +632,129 @@ internal class DshHomePage : BasePager() {
                             onQuestionSkip = { ctx.skipQuestion() },
                             onSubmitQuestion = { ctx.submitQuestion() },
                             availableWidth = ctx.pagerData.pageViewWidth,
+                            consumeFreshMessage = { ctx.consumeFreshMessage(it) },
                         )
                         ctx.perfLog("body.conversation.end wide=false")
                     }
                     }
                     }
+                    // 抽屉遮罩：独立纯色层，只做一次 GPU 混合。
+                    // 之前把 opacity 加在内容容器上，会强制整棵会话子树每帧离屏合成。
+                    // 关闭态不挂进树，避免它参与首页的命中测试。
+                    vif({ ctx.sessionDrawerVisible }) {
+                        View {
+                            attr {
+                                absolutePositionAllZero()
+                                backgroundColor(tokens.background)
+                                opacity(DshDrawerMotion.SCRIM_ALPHA * ctx.sessionDrawerProgress.coerceIn(0f, 1f))
+                                touchEnable(false)
+                            }
+                        }
+                    }
                     }
 
-                View {
-                    attr {
-                        val progress = ctx.sessionDrawerProgress.coerceIn(0f, 1f)
-                        val pageWidth = pagerData.pageViewWidth
-                        val drawerWidth = DshDrawerMotion.drawerWidth(pageWidth)
-                        absolutePositionAllZero()
-                        transform(
-                            scale = Scale(
-                                DshDrawerMotion.homeScale(progress),
-                                DshDrawerMotion.homeScale(progress),
-                            ),
-                            translate = Translate(
-                                0f,
-                                0f,
-                                DshDrawerMotion.homeShift(progress, pageWidth, drawerWidth),
-                                0f,
-                            ),
-                        )
-                        backgroundColor(Color.TRANSPARENT)
-                        touchEnable(
-                            (progress > 0f || ctx.sessionDrawerSettling) &&
-                                ctx.drawerPanSource != DshDrawerMotion.PAN_SOURCE_HOME,
-                        )
-                        capture(CaptureRule.pan(CaptureRuleDirection.HORIZONTAL))
-                        zIndex(3, useOutline = false)
-                    }
-                    event {
-                        click { if (!ctx.suppressDrawerClick) ctx.closeSessionDrawer() }
-                        dshFollowPan { ctx.handleCloseSwipe(it) }
+                vif({ ctx.sessionDrawerVisible }) {
+                    View {
+                        attr {
+                            val progress = ctx.sessionDrawerProgress.coerceIn(0f, 1f)
+                            val pageWidth = pagerData.pageViewWidth
+                            val drawerWidth = DshDrawerMotion.drawerWidth(pageWidth)
+                            absolutePositionAllZero()
+                            transform(
+                                scale = Scale(
+                                    DshDrawerMotion.homeScale(progress),
+                                    DshDrawerMotion.homeScale(progress),
+                                ),
+                                translate = Translate(
+                                    0f,
+                                    0f,
+                                    DshDrawerMotion.homeShift(progress, pageWidth, drawerWidth),
+                                    0f,
+                                ),
+                            )
+                            backgroundColor(Color.TRANSPARENT)
+                            touchEnable(
+                                (progress > 0f || ctx.sessionDrawerSettling) &&
+                                    ctx.drawerPanSource != DshDrawerMotion.PAN_SOURCE_HOME,
+                            )
+                            capture(CaptureRule.pan(CaptureRuleDirection.HORIZONTAL))
+                            zIndex(3, useOutline = false)
+                        }
+                        event {
+                            click { if (!ctx.suppressDrawerClick) ctx.closeSessionDrawer() }
+                            dshFollowPan { ctx.handleCloseSwipe(it) }
+                        }
                     }
                 }
 
-                View {
-                    attr {
-                        val progress = ctx.sessionDrawerProgress.coerceIn(0f, 1f)
-                        val drawerWidth = DshDrawerMotion.drawerWidth(pagerData.pageViewWidth)
-                        absolutePosition(left = 0f, top = 0f, bottom = 0f)
-                        width(drawerWidth)
-                        transform(Translate(0f, 0f, DshDrawerMotion.drawerShift(progress, drawerWidth), 0f))
-                        backgroundColor(tokens.background)
-                        overflow(true)
-                        touchEnable(progress > 0f && ctx.drawerPanSource != DshDrawerMotion.PAN_SOURCE_HOME)
-                        capture(CaptureRule.pan(CaptureRuleDirection.HORIZONTAL))
-                        zIndex(1, useOutline = false)
+                vif({ ctx.sessionDrawerVisible }) {
+                    View {
+                        attr {
+                            val progress = ctx.sessionDrawerProgress.coerceIn(0f, 1f)
+                            val drawerWidth = DshDrawerMotion.drawerWidth(pagerData.pageViewWidth)
+                            absolutePosition(left = 0f, top = 0f, bottom = 0f)
+                            width(drawerWidth)
+                            transform(Translate(0f, 0f, DshDrawerMotion.drawerShift(progress, drawerWidth), 0f))
+                            backgroundColor(tokens.background)
+                            overflow(true)
+                            touchEnable(progress > 0f && ctx.drawerPanSource != DshDrawerMotion.PAN_SOURCE_HOME)
+                            capture(CaptureRule.pan(CaptureRuleDirection.HORIZONTAL))
+                            zIndex(1, useOutline = false)
+                        }
+                        event { dshFollowPan { ctx.handleCloseSwipe(it) } }
+                        DshSessionDrawer(
+                            sessions = { ctx.visibleSessions },
+                            workspaceGroups = { ctx.workspaceGroups },
+                            archivedSessions = { ctx.archivedSessions },
+                            isWebTimeline = { ctx.isRemoteHost },
+                            activeId = { ctx.activeSessionId },
+                            onClose = { if (!ctx.suppressDrawerClick) ctx.closeSessionDrawer() },
+                            onOpenConnection = { ctx.openConnectionSettings() },
+                            onOpenAppSettings = { ctx.openAppSettingsHub() },
+                            onNewSession = { ctx.createSession() },
+                            onOpenArchived = {
+                                ctx.closeSessionDrawer()
+                                ctx.archivedSessionsVisible = true
+                            },
+                            sort = { ctx.sessionSort },
+                            onSort = { ctx.applySessionSort(it) },
+                            onManage = { ctx.openSessionManage(it) },
+                            onSelect = { id ->
+                                if (!ctx.suppressDrawerClick) {
+                                    ctx.closeSessionDrawer()
+                                    setTimeout(ctx.pagerId, 0) {
+                                        ctx.selectSession(id)
+                                    }
+                                }
+                            },
+                        )
                     }
-                    event { dshFollowPan { ctx.handleCloseSwipe(it) } }
-                    DshSessionDrawer(
-                        sessions = { ctx.visibleSessions },
-                        workspaceGroups = { ctx.workspaceGroups },
-                        archivedSessions = { ctx.archivedSessions },
-                        isWebTimeline = { ctx.isRemoteHost },
-                        activeId = { ctx.activeSessionId },
-                        onClose = { if (!ctx.suppressDrawerClick) ctx.closeSessionDrawer() },
-                        onOpenSettings = { ctx.openConnectionSettings() },
+                }
+
+                DshModalHost({ ctx.appSettingsHubVisible }) {
+                    DshAppSettingsHubModal(
+                        appearanceSummary = { ctx.appearanceSettingsSummary() },
+                        showPlugins = { ctx.isRemoteHost },
+                        pluginSummary = { ctx.pluginSettingsSummary() },
+                        logSummary = { ctx.logSettingsSummary() },
                         onOpenAppearance = { ctx.appearanceVisible = true },
                         onOpenPlugins = { ctx.openPluginMenu() },
                         onOpenLogs = { ctx.openLogCenter() },
-                        onNewSession = { ctx.createSession() },
-                        onOpenArchived = { ctx.archivedSessionsVisible = true },
-                        sort = { ctx.sessionSort },
-                        onSort = { ctx.applySessionSort(it) },
-                        onManage = { ctx.openSessionManage(it) },
-                        onSelect = { id ->
-                            if (!ctx.suppressDrawerClick) {
-                                ctx.closeSessionDrawer()
-                                setTimeout(ctx.pagerId, 0) {
-                                    ctx.selectSession(id)
-                                }
-                            }
-                        },
-                        onPan = { ctx.handleCloseSwipe(it) },
+                        onClose = { ctx.closeAppSettingsHub() },
                     )
                 }
 
-                vif({ ctx.appearanceVisible }) {
+                DshModalHost({ ctx.appearanceVisible }) {
                     DshAppearanceModal(
                         onSelect = { ctx.setThemePreference(it) },
                         onSelectCodeTheme = { ctx.setCodeThemePreference(it) },
                         onToggleHighContrast = { ctx.setHighContrast(it) },
+                        onToggleReduceMotion = { ctx.setReduceMotion(it) },
                         onClose = { ctx.appearanceVisible = false },
                     )
                 }
 
-                vif({ ctx.logCenterVisible }) {
+                DshModalHost({ ctx.logCenterVisible }) {
                     DshLogCenterModal(
                         query = { ctx.logQuery },
                         sessionQuery = { ctx.logSessionQuery },
@@ -740,7 +775,7 @@ internal class DshHomePage : BasePager() {
                     )
                 }
 
-                vif({ ctx.pluginMenuVisible && ctx.pluginDetailId.isEmpty() }) {
+                DshModalHost({ ctx.pluginMenuVisible && ctx.pluginDetailId.isEmpty() }) {
                     DshPluginInventoryModal(
                         loading = { ctx.pluginLoading },
                         refreshing = { ctx.pluginRefreshing },
@@ -762,7 +797,7 @@ internal class DshHomePage : BasePager() {
                     )
                 }
 
-                vif({ ctx.pluginMenuVisible && ctx.pluginDetailId.isNotEmpty() && ctx.pluginConfirmAction.isEmpty() }) {
+                DshModalHost({ ctx.pluginMenuVisible && ctx.pluginDetailId.isNotEmpty() }) {
                     DshPluginDetailModal(
                         entry = { ctx.selectedPlugin() },
                         writable = { ctx.pluginWritable },
@@ -776,7 +811,7 @@ internal class DshHomePage : BasePager() {
                     )
                 }
 
-                vif({ ctx.pluginMenuVisible && ctx.pluginConfirmAction.isNotEmpty() }) {
+                DshModalHost({ ctx.pluginMenuVisible && ctx.pluginConfirmAction.isNotEmpty() }) {
                     DshPluginConfirmModal(
                         action = { ctx.pluginConfirmAction },
                         entry = { ctx.selectedPlugin() },
@@ -814,7 +849,7 @@ internal class DshHomePage : BasePager() {
                     onClose = { ctx.messageOverflowVisible = false },
                 )
 
-                vif({ ctx.sessionManageTargetId.isNotEmpty() }) {
+                DshModalHost({ ctx.sessionManageTargetId.isNotEmpty() }) {
                     DshSessionManageModal(
                         title = {
                             ctx.sessions.firstOrNull { it.id == ctx.sessionManageTargetId }?.title
@@ -867,7 +902,7 @@ internal class DshHomePage : BasePager() {
                     )
                 }
 
-                vif({ ctx.sessionRenameTargetId.isNotEmpty() && ctx.isRemoteHost }) {
+                DshModalHost({ ctx.sessionRenameTargetId.isNotEmpty() && ctx.isRemoteHost }) {
                     DshSessionRenameModal(
                         draft = { ctx.sessionRenameDraft },
                         busy = { ctx.sessionActionBusy },
@@ -878,20 +913,7 @@ internal class DshHomePage : BasePager() {
                     )
                 }
 
-                vif({ ctx.sessionArchiveTargetId.isNotEmpty() && ctx.isRemoteHost }) {
-                    DshSessionArchiveModal(
-                        title = {
-                            ctx.sessions.firstOrNull { it.id == ctx.sessionArchiveTargetId }?.title
-                                ?: "此会话"
-                        },
-                        busy = { ctx.sessionActionBusy },
-                        error = { ctx.sessionActionError },
-                        onConfirm = { ctx.confirmSessionArchive() },
-                        onClose = { ctx.closeSessionActionModals() },
-                    )
-                }
-
-                vif({ ctx.sessionDeleteTargetId.isNotEmpty() && ctx.isRemoteHost }) {
+                DshModalHost({ ctx.sessionDeleteTargetId.isNotEmpty() && ctx.isRemoteHost }) {
                     DshSessionDeleteModal(
                         title = {
                             ctx.sessions.firstOrNull { it.id == ctx.sessionDeleteTargetId }?.title
@@ -905,7 +927,7 @@ internal class DshHomePage : BasePager() {
                     )
                 }
 
-                vif({ ctx.archivedSessionsVisible && ctx.isRemoteHost }) {
+                DshModalHost({ ctx.archivedSessionsVisible && ctx.isRemoteHost }) {
                     DshArchivedSessionsModal(
                         sessions = { ctx.archivedSessions },
                         activeId = { ctx.activeSessionId },
@@ -923,7 +945,7 @@ internal class DshHomePage : BasePager() {
                     )
                 }
 
-                vif({ ctx.modelPickerVisible }) {
+                DshModalHost({ ctx.modelPickerVisible }) {
                     DshModelPicker(
                         options = { ctx.modelOptions },
                         busy = { ctx.modelPickerBusy },
@@ -933,7 +955,7 @@ internal class DshHomePage : BasePager() {
                     )
                 }
 
-                vif({ ctx.credentialSetupVisible }) {
+                DshModalHost({ ctx.credentialSetupVisible }) {
                     DshCredentialSetupModal(
                         title = { ctx.credentialSetupTitle },
                         busy = { ctx.credentialSetupBusy },
@@ -950,7 +972,7 @@ internal class DshHomePage : BasePager() {
                         onClose = { ctx.closeCredentialSettings() },
                     )
                 }
-                vif({ ctx.sshSettingsVisible }) {
+                DshModalHost({ ctx.sshSettingsVisible }) {
                     DshConnectionSettingsModal(
                         sshMode = { ctx.sshMode },
                         host = { ctx.sshHost },
@@ -977,7 +999,7 @@ internal class DshHomePage : BasePager() {
                         },
                     )
                 }
-                vif({ ctx.workspaceBrowserVisible && ctx.isRemoteHost }) {
+                DshModalHost({ ctx.workspaceBrowserVisible && ctx.isRemoteHost }) {
                     DshWorkspaceBrowserModal(
                         path = { ctx.workspaceBrowserPath },
                         home = { ctx.workspaceBrowserHome },
@@ -992,95 +1014,23 @@ internal class DshHomePage : BasePager() {
                         onClose = { ctx.workspaceBrowserVisible = false },
                     )
                 }
-                vif({ ctx.workspaceRenameTargetId.isNotEmpty() && ctx.isRemoteHost }) {
-                    Modal(inWindow = true) {
-                        attr {
-                            absolutePositionAllZero()
-                            allCenter()
-                            paddingLeft(20f)
-                            paddingRight(20f)
-                            backgroundColor(tokens.scrim)
-                        }
-                        View {
-                            attr {
-                                width(pagerData.pageViewWidth - 40f)
-                                maxWidth(420f)
-                                padding(20f)
-                                borderRadius(16f)
-                                backgroundColor(tokens.surface)
-                            }
-                            Text { attr { text("重命名工作区"); fontSize(18f); fontWeightBold(); color(tokens.primaryText) } }
-                            Input {
-                                attr {
-                                    height(38f)
-                                    marginTop(14f)
-                                    fontSize(14f)
-                                    placeholder("工作区名称")
-                                    placeholderColor(tokens.tertiaryText)
-                                    text(ctx.workspaceRenameDraft)
-                                }
-                                event { textDidChange { ctx.workspaceRenameDraft = it.text } }
-                            }
-                            vif({ ctx.workspaceActionError.isNotEmpty() }) {
-                                Text { attr { text(ctx.workspaceActionError); marginTop(8f); fontSize(12f); color(tokens.error.foreground) } }
-                            }
-                            View {
-                                attr { height(40f); marginTop(18f); flexDirectionRow(); justifyContentFlexEnd() }
-                                Text {
-                                    attr { text("取消"); width(78f); height(38f); textAlignCenter(); fontSize(14f); color(tokens.secondaryText) }
-                                    event { click { ctx.workspaceRenameTargetId = ""; ctx.workspaceActionError = "" } }
-                                }
-                                Text {
-                                    attr { text(if (ctx.workspaceActionBusy) "保存中..." else "保存"); width(78f); height(38f); marginLeft(8f); textAlignCenter(); fontSize(14f); color(tokens.primary) }
-                                    event { click { if (!ctx.workspaceActionBusy) ctx.saveWorkspaceRename() } }
-                                }
-                            }
-                        }
-                    }
+                DshModalHost({ ctx.workspaceRenameTargetId.isNotEmpty() && ctx.isRemoteHost }) {
+                    DshWorkspaceRenameModal(
+                        draft = { ctx.workspaceRenameDraft },
+                        busy = { ctx.workspaceActionBusy },
+                        error = { ctx.workspaceActionError },
+                        onDraftChange = { ctx.workspaceRenameDraft = it; ctx.workspaceActionError = "" },
+                        onSave = { ctx.saveWorkspaceRename() },
+                        onClose = { ctx.workspaceRenameTargetId = ""; ctx.workspaceActionError = "" },
+                    )
                 }
-                vif({ ctx.workspaceDeleteTargetId.isNotEmpty() && ctx.isRemoteHost }) {
-                    Modal(inWindow = true) {
-                        attr {
-                            absolutePositionAllZero()
-                            allCenter()
-                            paddingLeft(20f)
-                            paddingRight(20f)
-                            backgroundColor(tokens.scrim)
-                        }
-                        View {
-                            attr {
-                                width(pagerData.pageViewWidth - 40f)
-                                maxWidth(420f)
-                                padding(20f)
-                                borderRadius(16f)
-                                backgroundColor(tokens.surface)
-                            }
-                            Text { attr { text("删除工作区注册?"); fontSize(18f); fontWeightBold(); color(tokens.primaryText) } }
-                            Text {
-                                attr {
-                                    text("只会从列表移除注册，不会删除目录、会话或日志。")
-                                    marginTop(8f)
-                                    fontSize(13f)
-                                    lineHeight(20f)
-                                    color(tokens.secondaryText)
-                                }
-                            }
-                            vif({ ctx.workspaceActionError.isNotEmpty() }) {
-                                Text { attr { text(ctx.workspaceActionError); marginTop(8f); fontSize(12f); color(tokens.error.foreground) } }
-                            }
-                            View {
-                                attr { height(40f); marginTop(18f); flexDirectionRow(); justifyContentFlexEnd() }
-                                Text {
-                                    attr { text("取消"); width(78f); height(38f); textAlignCenter(); fontSize(14f); color(tokens.secondaryText) }
-                                    event { click { ctx.workspaceDeleteTargetId = ""; ctx.workspaceActionError = "" } }
-                                }
-                                Text {
-                                    attr { text(if (ctx.workspaceActionBusy) "删除中..." else "删除注册"); width(112f); height(38f); marginLeft(8f); textAlignCenter(); fontSize(14f); color(tokens.error.foreground) }
-                                    event { click { if (!ctx.workspaceActionBusy) ctx.confirmWorkspaceDelete() } }
-                                }
-                            }
-                        }
-                    }
+                DshModalHost({ ctx.workspaceDeleteTargetId.isNotEmpty() && ctx.isRemoteHost }) {
+                    DshWorkspaceDeleteModal(
+                        busy = { ctx.workspaceActionBusy },
+                        error = { ctx.workspaceActionError },
+                        onConfirm = { ctx.confirmWorkspaceDelete() },
+                        onClose = { ctx.workspaceDeleteTargetId = ""; ctx.workspaceActionError = "" },
+                    )
                 }
 
                 vif({ ctx.sessionUndoId.isNotEmpty() }) {
@@ -1112,7 +1062,10 @@ internal class DshHomePage : BasePager() {
     private fun openSessionDrawer() {
         dismissKeyboard()
         settleSessionDrawer(1f)
-        warmRecentSessionCache(scrollToEndAfterLoad = false)
+        // 延迟到动画结束后再预热缓存，避免磁盘 I/O 与动画帧竞争 CPU
+        setTimeout(pagerId, DshDrawerMotion.SETTLE_MS.toInt() + 50) {
+            if (drawerTargetProgress == 1f) warmRecentSessionCache(scrollToEndAfterLoad = false)
+        }
     }
 
     private fun closeSessionDrawer() {
@@ -1146,7 +1099,7 @@ internal class DshHomePage : BasePager() {
                 syncDrawerVisible()
             }
         }
-        setTimeout(pagerId, 16) { frame() }
+        frame()
     }
 
     private fun handleHomeSwipe(params: PanGestureParams) =
@@ -1164,6 +1117,9 @@ internal class DshHomePage : BasePager() {
                 ++drawerMotionGeneration
                 sessionDrawerSettling = false
                 drawerPanSource = source
+                // 手势按下就把抽屉挂进树：否则第一次 move 要在同步回调里建整棵子树，
+                // 那一帧必然超时，表现为拖动不跟手。
+                sessionDrawerVisible = true
                 drawerPanStartX = params.pageX
                 drawerPanStartY = params.pageY
                 drawerPanStartProgress = sessionDrawerProgress
@@ -1221,6 +1177,34 @@ internal class DshHomePage : BasePager() {
             }
         }
     }
+
+    private fun openAppSettingsHub() {
+        closeSessionDrawer()
+        appSettingsHubVisible = true
+    }
+
+    private fun closeAppSettingsHub() {
+        appSettingsHubVisible = false
+        appearanceVisible = false
+        closeLogCenter()
+        closePluginMenu()
+    }
+
+    private fun appearanceSettingsSummary(): String {
+        val snapshot = theme
+        val label = snapshot.preference.label
+        return if (snapshot.highContrast) "$label · 高对比度" else label
+    }
+
+    private fun pluginSettingsSummary(): String =
+        when {
+            pluginLoading -> "加载中"
+            pluginEntries.isEmpty() -> "Host 插件"
+            else -> "${pluginEntries.size} 个"
+        }
+
+    private fun logSettingsSummary(): String =
+        if (logVisibleEntries.isEmpty()) "本地诊断" else "${logVisibleEntries.size} 条"
 
     private fun openPluginMenu() {
         closeSessionDrawer()
@@ -1859,6 +1843,8 @@ internal class DshHomePage : BasePager() {
 
     private fun openConnectionSettings(preserveError: Boolean = false) {
         dismissKeyboard()
+        closeSessionDrawer()
+        appSettingsHubVisible = false
         if (!preserveError) sshSettingsError = ""
         updateSshSettingsVisibility(true)
     }
@@ -2417,6 +2403,7 @@ internal class DshHomePage : BasePager() {
         // it. Seal that block before appending its card so the list follows the
         // actual event order instead of grouping all cards at the turn end.
         splitStreamingAssistantBeforeTool()
+        freshMessageIds.add(id)
         messages.add(model.toRemoteMessage(id))
         refreshSessionRenderTree(activeSessionId)
         scrollMessagesToEnd()
@@ -2917,6 +2904,7 @@ internal class DshHomePage : BasePager() {
         if (!isRemoteHost || archivedSessions.any { it.id == sessionId }) return
         sessionArchiveTargetId = sessionId
         sessionActionError = ""
+        confirmSessionArchive()
     }
 
     private fun confirmSessionArchive() {
@@ -2930,7 +2918,9 @@ internal class DshHomePage : BasePager() {
             setTimeout(pagerId, 0) {
                 sessionActionBusy = false
                 if (error != null) {
-                    sessionActionError = error.message
+                    sessionActionError = ""
+                    sessionArchiveTargetId = ""
+                    bridgeModule.toast("归档失败：${error.message}")
                     return@setTimeout
                 }
                 val wasActive = activeSessionId == sessionId
@@ -3888,6 +3878,7 @@ internal class DshHomePage : BasePager() {
         val assistantId = "assistant-${messages.size}"
         val reasoningId = "$assistantId-reasoning"
         val wasEmpty = messages.isEmpty()
+        freshMessageIds.add(user.id)
         messages.add(user)
         // DSH ChatView keeps the assistant node out of the flow until the
         // first token. The turn-status row ("Deep diving...") occupies that
@@ -4308,6 +4299,7 @@ internal class DshHomePage : BasePager() {
                 isReasoning = true,
             )
         } else {
+            freshMessageIds.add(id)
             messages.add(DshMessage(id, DshMessageRole.ASSISTANT, streamingReasoningContent, streaming = true, isReasoning = true))
         }
         realizeVisibleMessages()
@@ -4360,6 +4352,7 @@ internal class DshHomePage : BasePager() {
         if (id.isEmpty() || messages.any { it.id == id }) return
         // Keep content empty until settle. The first-flush snapshot must not
         // become the display source; DshMarkdown reads the live buffer.
+        freshMessageIds.add(id)
         messages.add(DshMessage(id, DshMessageRole.ASSISTANT, "", streaming = true))
         ensureLiveMessageCell()
     }
@@ -4426,6 +4419,8 @@ internal class DshHomePage : BasePager() {
             messages[index] = messages[index].copy(streaming = false, isReasoning = true)
         }
     }
+
+    private fun consumeFreshMessage(id: String): Boolean = freshMessageIds.remove(id)
 
     private fun scrollMessagesToEnd() {
         if (!followListTail) return

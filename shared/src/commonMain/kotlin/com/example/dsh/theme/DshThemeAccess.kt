@@ -12,3 +12,6 @@ internal val PagerScope.theme: DshThemeSnapshot
 
 internal val PagerScope.tokens: DshThemeTokens
     get() = theme.tokens
+
+internal val PagerScope.reduceMotion: Boolean
+    get() = (getPager() as BasePager).reduceMotionEnabled

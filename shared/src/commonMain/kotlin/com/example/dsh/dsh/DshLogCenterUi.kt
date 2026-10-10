@@ -2,15 +2,12 @@ package com.example.dsh.dsh
 
 import com.example.dsh.theme.tokens
 import com.tencent.kuikly.core.base.ViewContainer
-import com.tencent.kuikly.core.base.attr.ImageUri
 import com.tencent.kuikly.core.directives.vforLazy
 import com.tencent.kuikly.core.directives.vif
 import com.tencent.kuikly.core.layout.FlexWrap
 import com.tencent.kuikly.core.reactive.collection.ObservableList
-import com.tencent.kuikly.core.views.Image
 import com.tencent.kuikly.core.views.Input
 import com.tencent.kuikly.core.views.List
-import com.tencent.kuikly.core.views.Modal
 import com.tencent.kuikly.core.views.Scroller
 import com.tencent.kuikly.core.views.Text
 import com.tencent.kuikly.core.views.View
@@ -33,30 +30,15 @@ internal fun ViewContainer<*, *>.DshLogCenterModal(
     onJump: (String) -> Unit,
     onClose: () -> Unit,
 ) {
-    Modal(inWindow = true) {
-        attr {
-            absolutePositionAllZero()
-            allCenter()
-            paddingLeft(12f)
-            paddingRight(12f)
-            backgroundColor(tokens.scrim)
-        }
+    DshFullScreenModal {
         View {
             attr {
-                width(pagerData.pageViewWidth - 24f)
-                maxWidth(560f)
-                height((pagerData.pageViewHeight - 48f).coerceAtMost(720f))
+                flex(1f)
                 flexDirectionColumn()
-                padding(16f)
-                borderRadius(16f)
                 backgroundColor(tokens.background)
             }
             vif({ detail() == null }) {
-                View {
-                    attr { height(36f); flexDirectionRow(); alignItemsCenter() }
-                    Text { attr { text("日志"); flex(1f); fontSize(20f); fontWeightBold(); color(tokens.primaryText) } }
-                    View { attr { size(32f, 32f); allCenter() }; Image { attr { src(ImageUri.commonAssets("x.svg")); size(20f, 20f); tintColor(tokens.icon) } }; DshHitButton { onClose() } }
-                }
+                DshModalHeader(title = { "日志" }, subtitle = { "本地诊断记录" }, onClose = onClose)
                 Text {
                     attr {
                         text("本地环形缓冲，不含 chunk 正文、密钥和附件 Base64。清空不影响会话。")
@@ -65,10 +47,11 @@ internal fun ViewContainer<*, *>.DshLogCenterModal(
                         color(tokens.secondaryText)
                     }
                 }
+                Text { attr { text("内容关键词"); marginTop(12f); fontSize(12f); color(tokens.secondaryText) } }
                 View {
                     attr {
                         height(40f)
-                        marginTop(12f)
+                        marginTop(5f)
                         flexDirectionRow()
                         alignItemsCenter()
                         paddingLeft(12f)
@@ -89,10 +72,11 @@ internal fun ViewContainer<*, *>.DshLogCenterModal(
                         event { textDidChange { onQueryChange(it.text) } }
                     }
                 }
+                Text { attr { text("会话 ID"); marginTop(8f); fontSize(12f); color(tokens.secondaryText) } }
                 View {
                     attr {
                         height(40f)
-                        marginTop(8f)
+                        marginTop(5f)
                         flexDirectionRow()
                         alignItemsCenter()
                         paddingLeft(12f)
@@ -188,20 +172,12 @@ internal fun ViewContainer<*, *>.DshLogCenterModal(
             }
             vif({ detail() != null }) {
                 val current = detail()
-                View {
-                    attr { height(36f); flexDirectionRow(); alignItemsCenter() }
-                    Text {
-                        attr {
-                            text("返回")
-                            width(48f)
-                            fontSize(14f)
-                            color(tokens.primary)
-                        }
-                        event { click { onCloseDetail() } }
-                    }
-                    Text { attr { text("日志详情"); flex(1f); textAlignCenter(); fontSize(17f); fontWeightBold(); color(tokens.primaryText) } }
-                    View { attr { size(32f, 32f); allCenter() }; Image { attr { src(ImageUri.commonAssets("x.svg")); size(20f, 20f); tintColor(tokens.icon) } }; DshHitButton { onClose() } }
-                }
+                DshModalHeader(
+                    title = { "日志详情" },
+                    subtitle = { current?.eventType.orEmpty() },
+                    onBack = onCloseDetail,
+                    onClose = onClose,
+                )
                 Scroller {
                     attr { flex(1f); marginTop(8f) }
                     View {

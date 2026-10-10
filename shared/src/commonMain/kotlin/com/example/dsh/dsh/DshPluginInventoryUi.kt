@@ -3,18 +3,14 @@ package com.example.dsh.dsh
 import com.example.dsh.theme.tokens
 import com.tencent.kuikly.core.base.Border
 import com.tencent.kuikly.core.base.BorderStyle
-import com.tencent.kuikly.core.base.Color
 import com.tencent.kuikly.core.base.ViewContainer
-import com.tencent.kuikly.core.base.attr.ImageUri
 import com.tencent.kuikly.core.directives.vfor
 import com.tencent.kuikly.core.directives.vforLazy
 import com.tencent.kuikly.core.directives.vif
 import com.tencent.kuikly.core.layout.FlexWrap
 import com.tencent.kuikly.core.reactive.collection.ObservableList
-import com.tencent.kuikly.core.views.Image
 import com.tencent.kuikly.core.views.Input
 import com.tencent.kuikly.core.views.List
-import com.tencent.kuikly.core.views.Modal
 import com.tencent.kuikly.core.views.Scroller
 import com.tencent.kuikly.core.views.Text
 import com.tencent.kuikly.core.views.View
@@ -39,27 +35,20 @@ internal fun ViewContainer<*, *>.DshPluginInventoryModal(
     onOpen: (String) -> Unit,
     onClose: () -> Unit,
 ) {
-    Modal(inWindow = true) {
-        attr {
-            absolutePositionAllZero()
-            allCenter()
-            paddingLeft(12f)
-            paddingRight(12f)
-            backgroundColor(tokens.scrim)
-        }
+    DshFullScreenModal {
         View {
             attr {
-                width(pagerData.pageViewWidth - 24f)
-                maxWidth(560f)
-                height((pagerData.pageViewHeight - 48f).coerceAtMost(720f))
+                flex(1f)
                 flexDirectionColumn()
-                padding(16f)
-                borderRadius(16f)
                 backgroundColor(tokens.background)
             }
+            DshModalHeader(
+                title = { "插件" },
+                subtitle = { pluginInventorySubtitle(writable(), source(), entries().size) },
+                onClose = onClose,
+            )
             View {
-                attr { height(36f); flexDirectionRow(); alignItemsCenter() }
-                Text { attr { text("插件"); flex(1f); fontSize(20f); fontWeightBold(); color(tokens.primaryText) } }
+                attr { height(36f); flexDirectionRow(); alignItemsCenter(); justifyContentFlexEnd() }
                 Text {
                     attr {
                         text(if (refreshing()) "刷新中" else "刷新")
@@ -71,16 +60,8 @@ internal fun ViewContainer<*, *>.DshPluginInventoryModal(
                     }
                     event { click { if (!loading() && !refreshing()) onRefresh() } }
                 }
-                View { attr { size(32f, 32f); allCenter() }; Image { attr { src(ImageUri.commonAssets("x.svg")); size(20f, 20f); tintColor(tokens.icon) } }; DshHitButton { onClose() } }
             }
-            Text {
-                attr {
-                    text(pluginInventorySubtitle(writable(), source(), entries().size))
-                    marginTop(4f)
-                    fontSize(12f)
-                    color(tokens.secondaryText)
-                }
-            }
+            Text { attr { text("搜索插件"); marginTop(2f); fontSize(12f); color(tokens.secondaryText) } }
             View {
                 attr {
                     height(40f)
@@ -186,30 +167,19 @@ internal fun ViewContainer<*, *>.DshPluginDetailModal(
     onDisable: () -> Unit,
     onReload: () -> Unit,
 ) {
-    Modal(inWindow = true) {
-        attr {
-            absolutePositionAllZero()
-            allCenter()
-            paddingLeft(12f)
-            paddingRight(12f)
-            backgroundColor(tokens.scrim)
-        }
+    DshFullScreenModal {
         View {
             attr {
-                width(pagerData.pageViewWidth - 24f)
-                maxWidth(560f)
-                height((pagerData.pageViewHeight - 48f).coerceAtMost(720f))
+                flex(1f)
                 flexDirectionColumn()
-                padding(16f)
-                borderRadius(16f)
                 backgroundColor(tokens.background)
             }
-            View {
-                attr { height(36f); flexDirectionRow(); alignItemsCenter() }
-                Text { attr { text("返回"); width(44f); fontSize(14f); color(tokens.primary) }; event { click { onBack() } } }
-                Text { attr { text(entry()?.displayName ?: "插件详情"); flex(1f); textAlignCenter(); fontSize(17f); fontWeightBold(); color(tokens.primaryText) } }
-                View { attr { size(32f, 32f); allCenter() }; Image { attr { src(ImageUri.commonAssets("x.svg")); size(20f, 20f); tintColor(tokens.icon) } }; DshHitButton { onClose() } }
-            }
+            DshModalHeader(
+                title = { entry()?.displayName ?: "插件详情" },
+                subtitle = { entry()?.moduleName.orEmpty() },
+                onBack = onBack,
+                onClose = onClose,
+            )
             vif({ entry() == null }) {
                 DshPluginStateBlock("找不到这个插件", "它可能刚被卸载。返回列表后刷新再试。")
             }
@@ -309,16 +279,7 @@ internal fun ViewContainer<*, *>.DshPluginConfirmModal(
     onConfirm: () -> Unit,
     onClose: () -> Unit,
 ) {
-    Modal(inWindow = true) {
-        attr { absolutePositionAllZero(); allCenter(); padding(20f); backgroundColor(tokens.scrim) }
-        View {
-            attr {
-                width(pagerData.pageViewWidth - 40f)
-                maxWidth(420f)
-                padding(22f)
-                borderRadius(16f)
-                backgroundColor(tokens.surface)
-            }
+    DshDialogModal(busy = busy, onClose = onClose) {
             Text { attr { text("${pluginControlLabel(action())}插件？"); fontSize(18f); fontWeightBold(); color(tokens.primaryText) } }
             Text {
                 attr {
@@ -332,37 +293,13 @@ internal fun ViewContainer<*, *>.DshPluginConfirmModal(
             vif({ error().isNotEmpty() }) {
                 Text { attr { text(error()); marginTop(10f); fontSize(12f); color(tokens.error.foreground) } }
             }
-            View {
-                attr { marginTop(18f); height(40f); flexDirectionRow(); justifyContentFlexEnd() }
-                Text {
-                    attr {
-                        text("取消")
-                        width(64f)
-                        height(40f)
-                        textAlignCenter()
-                        fontSize(14f)
-                        color(tokens.secondaryText)
-                    }
-                    event { click { if (!busy()) onClose() } }
-                }
-                Button {
-                    attr {
-                        width(112f)
-                        height(40f)
-                        borderRadius(8f)
-                        backgroundColor(
-                            when {
-                                busy() -> tokens.primaryDisabled
-                                action() == "disable" -> tokens.error.foreground
-                                else -> tokens.primary
-                            },
-                        )
-                        titleAttr { text(if (busy()) "处理中..." else pluginControlLabel(action())); fontSize(14f); color(tokens.onPrimary) }
-                    }
-                    event { click { if (!busy()) onConfirm() } }
-                }
-            }
-        }
+            DshDialogActions(
+                confirmTitle = { if (busy()) "处理中..." else pluginControlLabel(action()) },
+                busy = busy,
+                destructive = action() == "disable",
+                onCancel = onClose,
+                onConfirm = onConfirm,
+            )
     }
 }
 

@@ -1,7 +1,10 @@
 package com.example.dsh.dsh
 
+import com.example.dsh.theme.DshMotion
 import com.tencent.kuikly.core.base.Color
+import com.tencent.kuikly.core.base.Scale
 import com.tencent.kuikly.core.base.ViewContainer
+import com.tencent.kuikly.core.base.VirtualView
 import com.tencent.kuikly.core.reactive.collection.ObservableList
 import com.tencent.kuikly.core.views.View
 
@@ -68,14 +71,49 @@ internal fun dshNextUnarchivedSession(
     sessions.firstOrNull { !it.blank && it.id != excludedId && !archivedIds.contains(it.id) }
         ?: sessions.firstOrNull { it.blank && it.id != excludedId && !archivedIds.contains(it.id) }
 
+/** 透明点击层：铺满父视图，按下时让父视图变淡，松开后恢复。 */
 internal fun ViewContainer<*, *>.DshHitButton(onClick: () -> Unit) {
+    DshPressLayer(pressedScale = 1f, onClick = onClick)
+}
+
+/** 主操作按钮用：按下时父视图同时轻微缩小。 */
+internal fun ViewContainer<*, *>.DshPressButton(pressedScale: Float = 0.92f, onClick: () -> Unit) {
+    DshPressLayer(pressedScale = pressedScale, onClick = onClick)
+}
+
+private fun ViewContainer<*, *>.DshPressLayer(pressedScale: Float, onClick: () -> Unit) {
     View {
+        val layer = this
+        var pressed = false
+        fun press(down: Boolean) {
+            if (pressed == down) return
+            pressed = down
+            val target = dshPressTarget(layer.parent) ?: return
+            val animation = if (down) DshMotion.press() else DshMotion.release()
+            target.animateToAttr(animation) {
+                opacity(if (down) DshMotion.PRESSED_OPACITY else 1f)
+                if (pressedScale != 1f && !DshMotion.reduced) {
+                    transform(Scale(if (down) pressedScale else 1f, if (down) pressedScale else 1f))
+                }
+            }
+        }
         attr {
             absolutePositionAllZero()
             backgroundColor(Color(0x00000000))
         }
-        event { click { onClick() } }
+        event {
+            touchDown { press(true) }
+            touchUp { press(false) }
+            touchCancel { press(false) }
+            click { onClick() }
+        }
     }
+}
+
+private fun dshPressTarget(start: ViewContainer<*, *>?): ViewContainer<*, *>? {
+    var node = start
+    while (node is VirtualView<*, *>) node = node.parent
+    return node
 }
 
 internal fun isConnectionReadyLabel(label: String): Boolean {
@@ -98,7 +136,7 @@ internal fun topBarConnectingText(label: String): String {
     return value
 }
 
-internal const val COMPOSER_HEIGHT = 118f
+internal const val COMPOSER_HEIGHT = 90f
 
 internal const val CHAT_INITIAL_RENDER_COUNT = 48
 internal const val CHAT_MAX_RENDERED_MESSAGES = 128

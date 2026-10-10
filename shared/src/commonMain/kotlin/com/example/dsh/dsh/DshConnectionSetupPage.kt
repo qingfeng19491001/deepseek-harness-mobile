@@ -45,6 +45,7 @@ internal class DshConnectionSetupPage : BasePager() {
     private var localStore: DshLocalStore? = null
     private var engineModule: DshEngineModule? = null
     private var probeRepository: DshRepository? = null
+    private var appSettingsHubVisible by observable(false)
     private var appearanceVisible by observable(false)
     private var logCenterVisible by observable(false)
     private var logQuery by observable("")
@@ -133,23 +134,12 @@ internal class DshConnectionSetupPage : BasePager() {
                         attr { size(40f, 40f); allCenter() }
                         Image {
                             attr {
-                                src(ImageUri.commonAssets("log.svg"))
+                                src(ImageUri.commonAssets("menu.svg"))
                                 size(20f, 20f)
                                 tintColor(tokens.icon)
                             }
                         }
-                        event { click { ctx.openLogCenter() } }
-                    }
-                    View {
-                        attr { size(40f, 40f); allCenter() }
-                        Image {
-                            attr {
-                                src(ImageUri.commonAssets("appearance.svg"))
-                                size(20f, 20f)
-                                tintColor(tokens.icon)
-                            }
-                        }
-                        event { click { ctx.appearanceVisible = true } }
+                        event { click { ctx.appSettingsHubVisible = true } }
                     }
                 }
                 View {
@@ -232,15 +222,28 @@ internal class DshConnectionSetupPage : BasePager() {
                         event { click { if (!ctx.busy) ctx.continueToHost() } }
                     }
                 }
-                vif({ ctx.appearanceVisible }) {
+                DshModalHost({ ctx.appSettingsHubVisible }) {
+                    DshAppSettingsHubModal(
+                        appearanceSummary = { ctx.appearanceSettingsSummary() },
+                        showPlugins = { false },
+                        pluginSummary = { "连接 Host 后可用" },
+                        logSummary = { ctx.logSettingsSummary() },
+                        onOpenAppearance = { ctx.appearanceVisible = true },
+                        onOpenPlugins = { },
+                        onOpenLogs = { ctx.openLogCenter() },
+                        onClose = { ctx.closeAppSettingsHub() },
+                    )
+                }
+                DshModalHost({ ctx.appearanceVisible }) {
                     DshAppearanceModal(
                         onSelect = { ctx.setThemePreference(it) },
                         onSelectCodeTheme = { ctx.setCodeThemePreference(it) },
                         onToggleHighContrast = { ctx.setHighContrast(it) },
+                        onToggleReduceMotion = { ctx.setReduceMotion(it) },
                         onClose = { ctx.appearanceVisible = false },
                     )
                 }
-                vif({ ctx.logCenterVisible }) {
+                DshModalHost({ ctx.logCenterVisible }) {
                     DshLogCenterModal(
                         query = { ctx.logQuery },
                         sessionQuery = { ctx.logSessionQuery },
@@ -476,6 +479,22 @@ internal class DshConnectionSetupPage : BasePager() {
     override fun onAppLogChanged() {
         if (logCenterVisible) refreshVisibleLogs()
     }
+
+    private fun closeAppSettingsHub() {
+        appSettingsHubVisible = false
+        appearanceVisible = false
+        logCenterVisible = false
+        logDetailId = 0L
+    }
+
+    private fun appearanceSettingsSummary(): String {
+        val snapshot = theme
+        val label = snapshot.preference.label
+        return if (snapshot.highContrast) "$label · 高对比度" else label
+    }
+
+    private fun logSettingsSummary(): String =
+        if (logVisibleEntries.isEmpty()) "本地诊断" else "${logVisibleEntries.size} 条"
 
     private fun openLogCenter() {
         logCenterVisible = true
