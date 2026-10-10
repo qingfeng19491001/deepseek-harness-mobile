@@ -22,7 +22,7 @@ internal object DshDrawerPhysics {
         if (time >= 1f) return 1f
         var low = 0f
         var high = 1f
-        repeat(24) {
+        repeat(12) {
             val t = (low + high) * 0.5f
             val u = 1f - t
             val x = 3f * u * u * t * 0.32f + t * t * t

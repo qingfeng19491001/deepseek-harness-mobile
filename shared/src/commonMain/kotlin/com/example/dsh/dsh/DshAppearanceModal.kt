@@ -3,16 +3,16 @@ package com.example.dsh.dsh
 import com.example.dsh.theme.DshCodeThemePreference
 import com.example.dsh.theme.DshThemePreference
 import com.example.dsh.theme.DshThemeSnapshot
+import com.example.dsh.theme.reduceMotion
 import com.example.dsh.theme.theme
 import com.example.dsh.theme.tokens
 import com.tencent.kuikly.core.base.Border
 import com.tencent.kuikly.core.base.BorderStyle
 import com.tencent.kuikly.core.base.Color
 import com.tencent.kuikly.core.base.ViewContainer
-import com.tencent.kuikly.core.base.attr.ImageUri
 import com.tencent.kuikly.core.directives.vif
-import com.tencent.kuikly.core.views.Image
-import com.tencent.kuikly.core.views.Modal
+import com.tencent.kuikly.core.views.Scroller
+import com.tencent.kuikly.core.views.Switch
 import com.tencent.kuikly.core.views.Text
 import com.tencent.kuikly.core.views.View
 
@@ -20,97 +20,109 @@ internal fun ViewContainer<*, *>.DshAppearanceModal(
     onSelect: (DshThemePreference) -> Unit,
     onSelectCodeTheme: (DshCodeThemePreference) -> Unit,
     onToggleHighContrast: (Boolean) -> Unit,
+    onToggleReduceMotion: (Boolean) -> Unit,
     onClose: () -> Unit,
 ) {
-    Modal(inWindow = true) {
-        attr {
-            absolutePositionAllZero()
-            allCenter()
-            paddingLeft(20f)
-            paddingRight(20f)
-            backgroundColor(tokens.scrim)
-        }
-        View {
-            attr {
-                absolutePositionAllZero()
-                backgroundColor(Color.TRANSPARENT)
-            }
-            event { click { onClose() } }
-        }
-        View {
-            attr {
-                width(pagerData.pageViewWidth - 40f)
-                maxWidth(420f)
-                flexDirectionColumn()
-                padding(24f)
-                borderRadius(18f)
-                backgroundColor(tokens.surface)
-                // 订阅 revision，避免只改偏好、深浅不变时单选圈不刷新。
-                opacity(if (theme.revision >= 0) 1f else 1f)
-            }
+    DshBottomSheetModal(
+        heightRatio = 0.86f,
+        minHeight = 320f,
+        maxHeight = 760f,
+        onClose = onClose,
+    ) {
+        DshModalHeader(title = { "外观" }, subtitle = { "选择后立即生效" }, onClose = onClose)
+        Scroller {
+            attr { flex(1f); showScrollerIndicator(false) }
             View {
-                attr { height(32f); flexDirectionRow(); alignItemsCenter() }
-                Text {
-                    attr {
-                        text("外观")
-                        flex(1f)
-                        fontSize(20f)
-                        fontWeightBold()
-                        color(tokens.primaryText)
+                attr {
+                    flexDirectionColumn()
+                    paddingBottom(12f)
+                    // 订阅 revision，避免只改偏好、深浅不变时单选圈不刷新。
+                    opacity(if (theme.revision >= 0) 1f else 1f)
+                }
+                DshAppearanceSectionLabel("主题模式")
+                DshAppearanceGroup {
+                    DshThemePreference.entries.forEachIndexed { index, preference ->
+                        DshAppearanceChoice(
+                            title = preference.label,
+                            selected = { theme.preference == preference },
+                            subtitle = { appearanceSubtitle(preference, theme) },
+                            marginTop = if (index == 0) 0f else 2f,
+                            onSelect = { onSelect(preference) },
+                        )
                     }
                 }
-                View {
-                    attr { size(32f, 32f); allCenter() }
-                    Image {
-                        attr {
-                            src(ImageUri.commonAssets("x.svg"))
-                            size(20f, 20f)
-                            tintColor(tokens.icon)
-                        }
+                DshAppearanceSectionLabel("代码主题")
+                DshAppearanceGroup {
+                    DshCodeThemePreference.entries.forEachIndexed { index, preference ->
+                        DshAppearanceChoice(
+                            title = preference.label,
+                            selected = { theme.codeTheme == preference },
+                            subtitle = {
+                                if (preference == DshCodeThemePreference.FOLLOW) {
+                                    if (theme.codeIsDark) "当前：深色高亮" else "当前：浅色高亮"
+                                } else {
+                                    ""
+                                }
+                            },
+                            marginTop = if (index == 0) 0f else 2f,
+                            onSelect = { onSelectCodeTheme(preference) },
+                        )
                     }
-                    event { click { onClose() } }
                 }
-            }
-            DshAppearanceSectionLabel("主题模式")
-            DshAppearanceGroup {
-                DshThemePreference.entries.forEachIndexed { index, preference ->
-                    DshAppearanceChoice(
-                        title = preference.label,
-                        selected = { theme.preference == preference },
-                        subtitle = { appearanceSubtitle(preference, theme) },
-                        marginTop = if (index == 0) 0f else 2f,
-                        onSelect = { onSelect(preference) },
+                DshAppearanceSectionLabel("无障碍")
+                DshAppearanceGroup {
+                    DshAppearanceSwitch(
+                        title = "高对比度",
+                        subtitle = "提高正文、分割线和状态色的对比",
+                        selected = { theme.highContrast },
+                        onToggle = onToggleHighContrast,
+                    )
+                    View { attr { height(2f) } }
+                    DshAppearanceSwitch(
+                        title = "减弱动态效果",
+                        subtitle = "弹窗、抽屉和按钮不再位移或缩放，只保留短暂淡入淡出",
+                        selected = { reduceMotion },
+                        onToggle = onToggleReduceMotion,
                     )
                 }
             }
-            DshAppearanceSectionLabel("代码主题")
-            DshAppearanceGroup {
-                DshCodeThemePreference.entries.forEachIndexed { index, preference ->
-                    DshAppearanceChoice(
-                        title = preference.label,
-                        selected = { theme.codeTheme == preference },
-                        subtitle = {
-                            if (preference == DshCodeThemePreference.FOLLOW) {
-                                if (theme.codeIsDark) "当前：深色高亮" else "当前：浅色高亮"
-                            } else {
-                                ""
-                            }
-                        },
-                        marginTop = if (index == 0) 0f else 2f,
-                        onSelect = { onSelectCodeTheme(preference) },
-                    )
-                }
+        }
+    }
+}
+
+private fun ViewContainer<*, *>.DshAppearanceSwitch(
+    title: String,
+    subtitle: String,
+    selected: () -> Boolean,
+    onToggle: (Boolean) -> Unit,
+) {
+    View {
+        attr {
+            minHeight(64f)
+            flexDirectionRow()
+            alignItemsCenter()
+            paddingLeft(12f)
+            paddingRight(8f)
+            paddingTop(8f)
+            paddingBottom(8f)
+            borderRadius(9f)
+            backgroundColor(tokens.surface)
+        }
+        View {
+            attr { flex(1f); flexDirectionColumn() }
+            Text { attr { text(title); fontSize(15f); fontWeightMedium(); color(tokens.primaryText) } }
+            Text { attr { text(subtitle); marginTop(3f); fontSize(12f); color(tokens.tertiaryText) } }
+        }
+        Switch {
+            attr {
+                width(48f)
+                height(28f)
+                isOn(selected())
+                onColor(tokens.primary)
+                unOnColor(tokens.dividerStrong)
+                thumbColor(Color.WHITE)
             }
-            DshAppearanceSectionLabel("无障碍")
-            DshAppearanceGroup {
-                DshAppearanceChoice(
-                    title = "高对比度",
-                    selected = { theme.highContrast },
-                    subtitle = { "提高正文、分割线和状态色的对比" },
-                    marginTop = 0f,
-                    onSelect = { onToggleHighContrast(!theme.highContrast) },
-                )
-            }
+            event { switchOnChanged { onToggle(it) } }
         }
     }
 }

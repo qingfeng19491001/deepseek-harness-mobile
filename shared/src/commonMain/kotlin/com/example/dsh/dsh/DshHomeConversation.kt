@@ -1,20 +1,22 @@
 package com.example.dsh.dsh
 
+import com.example.dsh.theme.DshMotion
 import com.example.dsh.theme.theme
 import com.example.dsh.theme.tokens
 import com.tencent.kuikly.core.base.*
 import com.tencent.kuikly.core.base.attr.ImageUri
 import com.tencent.kuikly.core.directives.vbind
 import com.tencent.kuikly.core.directives.vif
-import com.tencent.kuikly.core.directives.velse
 import com.tencent.kuikly.core.directives.vfor
 import com.tencent.kuikly.core.directives.vforLazy
 import com.tencent.kuikly.core.layout.FlexAlign
 import com.tencent.kuikly.core.reactive.collection.ObservableList
+import com.tencent.kuikly.core.reactive.handler.observable
+import com.tencent.kuikly.core.timer.setTimeout
 import com.tencent.kuikly.core.views.Image
-import com.tencent.kuikly.core.views.Input
-import com.tencent.kuikly.core.views.InputView
 import com.tencent.kuikly.core.views.KeyboardParams
+import com.tencent.kuikly.core.views.TextArea
+import com.tencent.kuikly.core.views.TextAreaView
 import com.tencent.kuikly.core.views.List
 import com.tencent.kuikly.core.views.ListView
 import com.tencent.kuikly.core.views.ScrollParams
@@ -43,6 +45,7 @@ internal fun ViewContainer<*, *>.DshTurnStatus(
                     color(tokens.primary)
                 }
             }
+            DshPulseDots()
             vif({ elapsedMs() >= TURN_STATUS_CLOCK_AFTER_MS }) {
                 Text {
                     attr {
@@ -58,6 +61,66 @@ internal fun ViewContainer<*, *>.DshTurnStatus(
 }
 
 internal const val TURN_STATUS_CLOCK_AFTER_MS = 15_000L
+
+/** 三个圆点依次点亮，表示回合仍在进行；挂载期间自带节拍，卸载即停。 */
+internal class DshPulseDotsView : ComposeView<ComposeAttr, ComposeEvent>() {
+    private var phase by observable(0)
+    private var alive = false
+
+    override fun createAttr(): ComposeAttr = ComposeAttr()
+    override fun createEvent(): ComposeEvent = ComposeEvent()
+
+    override fun viewDidLoad() {
+        super.viewDidLoad()
+        alive = true
+        scheduleTick()
+    }
+
+    override fun didRemoveFromParentView() {
+        alive = false
+        super.didRemoveFromParentView()
+    }
+
+    private fun scheduleTick() {
+        setTimeout(pagerId, PULSE_STEP_MS) {
+            if (!alive) return@setTimeout
+            if (!DshMotion.reduced) phase = (phase + 1) % PULSE_DOTS
+            scheduleTick()
+        }
+    }
+
+    override fun body(): ViewBuilder {
+        val ctx = this
+        return {
+            View {
+                attr {
+                    marginLeft(6f)
+                    flexDirectionRow()
+                    alignItemsCenter()
+                }
+                repeat(PULSE_DOTS) { index ->
+                    View {
+                        attr {
+                            size(5f, 5f)
+                            marginLeft(if (index == 0) 0f else 4f)
+                            borderRadius(2.5f)
+                            backgroundColor(tokens.primary)
+                            opacity(if (ctx.phase == index) 1f else 0.28f)
+                            animation(Animation.easeInOut(PULSE_STEP_MS / 1000f), ctx.phase)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+internal fun ViewContainer<*, *>.DshPulseDots() {
+    addChild(DshPulseDotsView()) { }
+}
+
+private const val PULSE_DOTS = 3
+private const val PULSE_STEP_MS = 360
 
 internal fun ViewContainer<*, *>.DshNewSessionHome() {
     View {
@@ -136,7 +199,7 @@ internal fun ViewContainer<*, *>.DshConversation(
     keyboardHeight: () -> Float,
     stopButtonVisible: () -> Boolean,
     keyboardAnimation: () -> Animation,
-    inputRef: (com.tencent.kuikly.core.base.ViewRef<InputView>) -> Unit,
+    inputRef: (com.tencent.kuikly.core.base.ViewRef<TextAreaView>) -> Unit,
     onInputFocusChange: (Boolean) -> Unit,
     onDraftChange: (String) -> Unit,
     onKeyboardHeightChange: (KeyboardParams) -> Unit,
@@ -215,6 +278,7 @@ internal fun ViewContainer<*, *>.DshConversation(
     onQuestionSkip: () -> Unit,
     onSubmitQuestion: () -> Unit,
     availableWidth: Float,
+    consumeFreshMessage: (String) -> Boolean = { false },
 ) {
     View {
         attr {
@@ -278,9 +342,17 @@ internal fun ViewContainer<*, *>.DshConversation(
                                     maxLoadItem = CHAT_MAX_RENDERED_MESSAGES,
                                 ) { message, _, _ ->
                                     View {
+                                        val fresh = consumeFreshMessage(message.id)
+                                        if (fresh) dshEnterOnceLaidOut(this)
                                         ref { messageRef(sessionId, message.id, it) }
                                         attr {
                                             width((availableWidth - 36f).coerceAtLeast(0f))
+                                            if (fresh && !DshMotion.reduced) {
+                                                opacity(0f)
+                                                transform(Translate(0f, 0f, 0f, DshMotion.MESSAGE_ENTER_OFFSET))
+                                            } else if (fresh) {
+                                                opacity(0f)
+                                            }
                                         }
                                         DshMessageRow(
                                             message,
@@ -436,19 +508,19 @@ internal fun ViewContainer<*, *>.DshConversation(
                     paddingLeft(12f)
                     paddingRight(12f)
                     paddingTop(4f)
-                    paddingBottom(10f)
-                    backgroundColor(tokens.surface)
+                    paddingBottom(4f)
                 }
                 View {
                 attr {
-                    height(
+                    minHeight(
                         COMPOSER_HEIGHT +
-                            if (draftImages().isNotEmpty()) DRAFT_THUMB_SIZE + 16f else 0f,
+                            if (draftImages().isNotEmpty()) DRAFT_THUMB_SIZE + 12f else 0f,
                     )
                     flexDirectionColumn()
-                    padding(12f, 14f, 10f, 14f)
-                    backgroundColor(tokens.surfaceVariant)
+                    padding(12f, 12f, 8f, 12f)
+                    backgroundColor(tokens.surfaceElevated)
                     borderRadius(28f)
+                    border(Border(1f, BorderStyle.SOLID, tokens.divider))
                     opacity(if (theme.revision >= 0) 1f else 1f)
                 }
                 vif({
@@ -503,10 +575,11 @@ internal fun ViewContainer<*, *>.DshConversation(
                 onRemove = onRemoveDraftImage,
                 onRetry = onRetryDraftImage,
             )
-            Input {
+            TextArea {
                 ref { inputRef(it) }
                 attr {
-                    height(40f)
+                    minHeight(32f)
+                    maxHeight(96f)
                     backgroundColor(Color.TRANSPARENT)
                     fontSize(16f)
                     color(tokens.primaryText)
@@ -517,7 +590,6 @@ internal fun ViewContainer<*, *>.DshConversation(
                         },
                     )
                     placeholderColor(tokens.tertiaryText)
-                    returnKeyTypeSend()
                     editable(!voiceActive())
                 }
                 event {
@@ -528,27 +600,25 @@ internal fun ViewContainer<*, *>.DshConversation(
                         onInputFocusChange(false)
                         onKeyboardHeightChange(KeyboardParams(0f, 0.24f))
                     }
-                    inputReturn { onSend() }
                 }
             }
 
             View {
                 attr {
                     height(36f)
-                    marginTop(8f)
+                    marginTop(6f)
                     flexDirectionRow()
                     alignItemsCenter()
                 }
                 View {
                     attr {
-                        width(184f)
+                        width(150f)
                         height(32f)
                         flexDirectionRow()
                         alignItemsCenter()
                         paddingLeft(12f)
-                        paddingRight(9f)
+                        paddingRight(10f)
                         borderRadius(16f)
-                        border(Border(1f, BorderStyle.SOLID, tokens.divider))
                         backgroundColor(tokens.surface)
                     }
                     Text {
@@ -556,14 +626,14 @@ internal fun ViewContainer<*, *>.DshConversation(
                             text(modelLabel())
                             flex(1f)
                             lines(1)
-                            fontSize(13f)
+                            fontSize(12f)
                             color(tokens.primaryText)
                         }
                     }
                     Image {
                         attr {
                             src(ImageUri.commonAssets("chevron-down.svg"))
-                            size(16f, 16f)
+                            size(14f, 14f)
                             tintColor(tokens.icon)
                         }
                     }
@@ -574,64 +644,30 @@ internal fun ViewContainer<*, *>.DshConversation(
                     attr {
                         size(36f, 36f)
                         allCenter()
-                        borderRadius(18f)
-                        border(Border(1f, BorderStyle.SOLID, tokens.divider))
-                        backgroundColor(tokens.surface)
                     }
-                    Image { attr { src(ImageUri.commonAssets("plus.svg")); size(18f, 18f); tintColor(tokens.icon) } }
+                    Image { attr { src(ImageUri.commonAssets("plus.svg")); size(22f, 22f); tintColor(tokens.primaryText) } }
                     DshHitButton(onToggleAttachments)
                 }
                 View {
                     attr {
                         size(36f, 36f)
-                        marginLeft(8f)
+                        marginLeft(6f)
                         borderRadius(18f)
                         allCenter()
-                        border(
-                            Border(
-                                1f,
-                                BorderStyle.SOLID,
-                                if (stopButtonVisible() || draft().isNotEmpty() || draftImages().isNotEmpty() || voiceActive()) {
-                                    Color.TRANSPARENT
-                                } else {
-                                    tokens.divider
-                                },
-                            ),
-                        )
                         backgroundColor(
-                            when {
-                                stopButtonVisible() -> tokens.error.foreground
-                                voiceActive() -> tokens.info.foreground
-                                draft().isNotEmpty() || draftImages().isNotEmpty() -> tokens.primary
-                                else -> tokens.surface
+                            when (dshComposerAction(stopButtonVisible(), voiceActive(), draft(), draftImages())) {
+                                DshComposerAction.STOP -> tokens.error.foreground
+                                DshComposerAction.SEND -> tokens.primary
+                                DshComposerAction.VOICE ->
+                                    if (voiceActive()) tokens.info.foreground else Color.TRANSPARENT
                             },
                         )
+                        dshComposerActionAnimation(stopButtonVisible, voiceActive, draft)
                     }
-                    vif({ stopButtonVisible() }) {
-                        Image {
-                            attr {
-                                src(ImageUri.commonAssets("square.svg"))
-                                size(18f, 18f)
-                                tintColor(tokens.onPrimary)
-                            }
-                        }
-                    }
-                    velse {
-                    Image {
-                        attr {
-                            src(ImageUri.commonAssets(if (draft().isEmpty() && draftImages().isEmpty()) "mic.svg" else "send.svg"))
-                            size(18f, 18f)
-                            tintColor(
-                                if (draft().isEmpty() && draftImages().isEmpty() && !voiceActive()) {
-                                    tokens.icon
-                                } else {
-                                    tokens.onPrimary
-                                },
-                            )
-                        }
-                    }
-                    }
-                    DshHitButton {
+                    DshComposerActionIcon(DshComposerAction.VOICE, "voice-waves.svg", 22f, stopButtonVisible, voiceActive, draft, draftImages)
+                    DshComposerActionIcon(DshComposerAction.SEND, "send.svg", 16f, stopButtonVisible, voiceActive, draft, draftImages)
+                    DshComposerActionIcon(DshComposerAction.STOP, "square.svg", 16f, stopButtonVisible, voiceActive, draft, draftImages)
+                    DshPressButton {
                             when {
                                 stopButtonVisible() -> onStop()
                                 draft().isNotEmpty() || draftImages().isNotEmpty() -> onSend()
@@ -1077,3 +1113,73 @@ private fun ViewContainer<*, *>.DshSelectableMessageShell(
         }
     }
 }
+
+/**
+ * 新 cell 先以 [DshMotion.MESSAGE_ENTER_OFFSET] 下移、透明的状态排版，
+ * 等渲染层拿到首帧后再过渡到原位。attr 不读任何 observable，终态不会被重算覆盖。
+ */
+private fun dshEnterOnceLaidOut(cell: DeclarativeBaseView<*, *>) {
+    cell.getPager().addTaskWhenPagerUpdateLayoutFinish {
+        setTimeout(cell.pagerId, DSH_FIRST_FRAME_MS) {
+            cell.animateToAttr(DshMotion.enter()) {
+                opacity(1f)
+                transform(Translate(0f, 0f, 0f, 0f))
+            }
+        }
+    }
+}
+
+internal const val DSH_FIRST_FRAME_MS = 32
+
+internal enum class DshComposerAction { VOICE, SEND, STOP }
+
+internal fun dshComposerAction(
+    stopVisible: Boolean,
+    voiceActive: Boolean,
+    draft: String,
+    images: List<DshDraftImage>,
+): DshComposerAction = when {
+    stopVisible -> DshComposerAction.STOP
+    !voiceActive && (draft.isNotEmpty() || images.isNotEmpty()) -> DshComposerAction.SEND
+    else -> DshComposerAction.VOICE
+}
+
+/** 主按钮的三种状态都由这三个 observable 驱动；分别登记，任何一个变化都走同一条过渡。 */
+private fun Attr.dshComposerActionAnimation(
+    stopVisible: () -> Boolean,
+    voiceActive: () -> Boolean,
+    draft: () -> String,
+) {
+    animation(DshMotion.micro(), stopVisible())
+    animation(DshMotion.micro(), voiceActive())
+    animation(DshMotion.micro(), draft())
+}
+
+/** 三个图标叠放在按钮中心，切换时交叉淡入并从 0.5 缩放到 1。 */
+private fun ViewContainer<*, *>.DshComposerActionIcon(
+    action: DshComposerAction,
+    asset: String,
+    iconSize: Float,
+    stopVisible: () -> Boolean,
+    voiceActive: () -> Boolean,
+    draft: () -> String,
+    draftImages: () -> ObservableList<DshDraftImage>,
+) {
+    Image {
+        attr {
+            val inset = (COMPOSER_ACTION_SIZE - iconSize) / 2f
+            absolutePosition(top = inset, left = inset)
+            size(iconSize, iconSize)
+            src(ImageUri.commonAssets(asset))
+            val shown = dshComposerAction(stopVisible(), voiceActive(), draft(), draftImages()) == action
+            val idleVoice = action == DshComposerAction.VOICE && !voiceActive()
+            tintColor(if (idleVoice) tokens.icon else tokens.onPrimary)
+            val scale = if (shown || DshMotion.reduced) 1f else 0.5f
+            opacity(if (shown) 1f else 0f)
+            transform(Scale(scale, scale))
+            dshComposerActionAnimation(stopVisible, voiceActive, draft)
+        }
+    }
+}
+
+private const val COMPOSER_ACTION_SIZE = 36f

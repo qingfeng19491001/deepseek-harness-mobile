@@ -197,28 +197,22 @@ internal fun ViewContainer<*, *>.DshMessageOverflowModal(
     onManageSession: () -> Unit = {},
     onClose: () -> Unit,
 ) {
-    vif({ visible() }) {
-        View {
-            attr {
-                absolutePositionAllZero()
-                zIndex(20)
-                backgroundColor(tokens.scrim)
-                justifyContentFlexEnd()
-            }
-            event { click { onClose() } }
+    DshModalHost({ visible() }) {
+        DshBottomSheetModal(
+            heightRatio = 0.34f,
+            minHeight = 260f,
+            maxHeight = 340f,
+            onClose = onClose,
+        ) {
+            DshModalHeader(title = { "当前会话" }, subtitle = { "选择要执行的操作" }, onClose = onClose)
             View {
                 attr {
-                    marginLeft(12f)
-                    marginRight(12f)
-                    marginBottom(pagerData.safeAreaInsets.bottom + 12f)
-                    padding(8f)
-                    borderRadius(16f)
-                    backgroundColor(tokens.surface)
+                    flex(1f)
+                    flexDirectionColumn()
                 }
-                event { click { } }
                 View {
                     attr {
-                        height(48f)
+                        height(52f)
                         allCenter()
                     }
                     Text {
@@ -233,7 +227,7 @@ internal fun ViewContainer<*, *>.DshMessageOverflowModal(
                 View { attr { height(1f); backgroundColor(tokens.divider) } }
                 View {
                     attr {
-                        height(48f)
+                        height(52f)
                         allCenter()
                     }
                     Text {
@@ -248,7 +242,7 @@ internal fun ViewContainer<*, *>.DshMessageOverflowModal(
                 View { attr { height(1f); backgroundColor(tokens.divider) } }
                 View {
                     attr {
-                        height(48f)
+                        height(52f)
                         allCenter()
                     }
                     Text {
@@ -259,21 +253,6 @@ internal fun ViewContainer<*, *>.DshMessageOverflowModal(
                         }
                     }
                     DshHitButton { onManageSession() }
-                }
-                View { attr { height(8f); backgroundColor(tokens.background) } }
-                View {
-                    attr {
-                        height(48f)
-                        allCenter()
-                    }
-                    Text {
-                        attr {
-                            text("取消")
-                            fontSize(16f)
-                            color(tokens.secondaryText)
-                        }
-                    }
-                    DshHitButton { onClose() }
                 }
             }
         }

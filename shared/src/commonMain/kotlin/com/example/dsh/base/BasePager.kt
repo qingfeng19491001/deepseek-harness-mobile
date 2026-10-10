@@ -8,6 +8,7 @@ import com.example.dsh.dsh.DshSseModule
 import com.example.dsh.dsh.DshThemeModule
 import com.example.dsh.dsh.DshWebSocketModule
 import com.example.dsh.theme.DshCodeThemePreference
+import com.example.dsh.theme.DshMotion
 import com.example.dsh.theme.DshSolarClock
 import com.example.dsh.theme.DshTheme
 import com.example.dsh.theme.DshThemePreference
@@ -33,6 +34,9 @@ internal abstract class BasePager : Pager() {
      * 这里镜像是为了让 Kuikly observable 能驱动 attr 更新。
      */
     var theme: DshThemeSnapshot by observable(DshTheme.snapshot)
+        private set
+
+    var reduceMotionEnabled: Boolean by observable(false)
         private set
 
     private var themeCallbackRef: CallbackRef? = null
@@ -62,8 +66,13 @@ internal abstract class BasePager : Pager() {
             storedHighContrast = storedContrast,
             solarNight = currentSolarNight(),
         )
+        DshMotion.reduced = readPref(DshMotion.PREF_KEY) == "1"
+        reduceMotionEnabled = DshMotion.reduced
         theme = DshTheme.snapshot
-        themeCallbackRef = notifyModule().addNotify(DshTheme.EVENT) { theme = DshTheme.snapshot }
+        themeCallbackRef = notifyModule().addNotify(DshTheme.EVENT) {
+            reduceMotionEnabled = DshMotion.reduced
+            theme = DshTheme.snapshot
+        }
         DshAppLog.publisher = { notifyModule().postNotify(DshAppLog.EVENT, JSONObject()) }
         logCallbackRef = notifyModule().addNotify(DshAppLog.EVENT) { onAppLogChanged() }
         ingestPersistedCrash()
@@ -113,6 +122,13 @@ internal abstract class BasePager : Pager() {
         persistOrToast(DshTheme.HIGH_CONTRAST_KEY, if (enabled) "1" else "0")
         DshTheme.setHighContrast(enabled)
         publishTheme()
+    }
+
+    fun setReduceMotion(enabled: Boolean) {
+        persistOrToast(DshMotion.PREF_KEY, if (enabled) "1" else "0")
+        DshMotion.reduced = enabled
+        reduceMotionEnabled = enabled
+        notifyModule().postNotify(DshTheme.EVENT, JSONObject())
     }
 
     override fun isNightMode(): Boolean = DshTheme.snapshot.isDark

@@ -1,9 +1,11 @@
 package com.example.dsh.dsh
 
+import com.example.dsh.theme.DshMotion
 import com.example.dsh.theme.tokens
 import com.tencent.kuikly.core.base.Border
 import com.tencent.kuikly.core.base.BorderStyle
 import com.tencent.kuikly.core.base.Color
+import com.tencent.kuikly.core.base.Scale
 import com.tencent.kuikly.core.base.ViewContainer
 import com.tencent.kuikly.core.base.attr.ImageUri
 import com.tencent.kuikly.core.directives.vif
@@ -196,10 +198,11 @@ internal fun ViewContainer<*, *>.DshAttachmentSheet(
                 View {
                     attr {
                         flexDirectionColumn()
-                        backgroundColor(tokens.surface)
-                        borderRadius(16f, 16f, 0f, 0f)
-                        padding(16f, 16f, 24f, 16f)
+                        backgroundColor(tokens.surfaceElevated)
+                        borderRadius(20f, 20f, 0f, 0f)
+                        padding(8f, 16f, pagerData.safeAreaInsets.bottom + 12f, 16f)
                     }
+                    DshSheetHandle()
                     Text {
                         attr {
                             text("添加图片")
@@ -276,14 +279,28 @@ internal fun ViewContainer<*, *>.DshImagePreviewModal(
     onDelete: () -> Unit = {},
     onClose: () -> Unit,
 ) {
-    vif({ visible() }) {
+    DshModalHost({ visible() }) {
+        val motion = dshModalMotion()
         Modal(inWindow = true) {
             attr {
                 absolutePositionAllZero()
-                backgroundColor(Color(0xF2000000L))
+                backgroundColor(Color.TRANSPARENT)
             }
             View {
                 attr {
+                    absolutePositionAllZero()
+                    backgroundColor(Color(0xF2000000L))
+                    opacity(if (motion.presented) 1f else 0f)
+                    animation(DshMotion.scrimPresence(motion.presented), motion.presented)
+                }
+            }
+            View {
+                attr {
+                    val shown = motion.presented
+                    val scale = if (shown || DshMotion.reduced) 1f else DshMotion.DIALOG_ENTER_SCALE
+                    opacity(if (shown) 1f else 0f)
+                    transform(Scale(scale, scale))
+                    animation(DshMotion.presence(shown), motion.presented)
                     absolutePositionAllZero()
                     flexDirectionColumn()
                     paddingTop(pagerData.statusBarHeight + 8f)

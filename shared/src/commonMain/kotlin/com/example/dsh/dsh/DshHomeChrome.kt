@@ -2,10 +2,7 @@ package com.example.dsh.dsh
 
 import com.example.dsh.theme.tokens
 import com.tencent.kuikly.core.base.*
-import com.tencent.kuikly.core.base.attr.CaptureRule
-import com.tencent.kuikly.core.base.attr.CaptureRuleDirection
 import com.tencent.kuikly.core.base.attr.ImageUri
-import com.tencent.kuikly.core.base.event.PanGestureParams
 import com.tencent.kuikly.core.directives.vif
 import com.tencent.kuikly.core.directives.velse
 import com.tencent.kuikly.core.directives.vfor
@@ -15,7 +12,6 @@ import com.tencent.kuikly.core.views.Image
 import com.tencent.kuikly.core.views.Input
 import com.tencent.kuikly.core.views.InputView
 import com.tencent.kuikly.core.views.List
-import com.tencent.kuikly.core.views.Modal
 import com.tencent.kuikly.core.views.Scroller
 import com.tencent.kuikly.core.views.Text
 import com.tencent.kuikly.core.views.View
@@ -43,23 +39,23 @@ internal fun ViewContainer<*, *>.DshConnectionSettingsModal(
     onClose: () -> Unit,
     onOpenApiKey: () -> Unit,
 ) {
-    Modal(inWindow = true) {
-        attr { absolutePositionAllZero(); allCenter(); backgroundColor(tokens.scrim); padding(20f) }
-        View {
-            attr {
-                width(pagerData.pageViewWidth - 40f)
-                maxWidth(440f)
-                flexDirectionColumn()
-                padding(22f)
-                borderRadius(16f)
-                backgroundColor(tokens.surface)
-            }
+    DshBottomSheetModal(
+        busy = busy,
+        heightRatio = 0.78f,
+        minHeight = 360f,
+        maxHeight = 680f,
+        onClose = { if (!busy()) onClose() },
+    ) {
+        DshModalHeader(
+            title = { "连接" },
+            subtitle = { "Agent 与电脑连接方式" },
+            onClose = { if (!busy()) onClose() },
+        )
+        Scroller {
+            attr { flex(1f); showScrollerIndicator(false) }
             View {
-                attr { height(32f); flexDirectionRow(); alignItemsCenter() }
-                Text { attr { text("连接设置"); flex(1f); fontSize(20f); fontWeightBold(); color(tokens.primaryText) } }
-                View { attr { size(32f, 32f); allCenter() }; Image { attr { src(ImageUri.commonAssets("x.svg")); size(20f, 20f); tintColor(tokens.icon) } }; DshHitButton { if (!busy()) onClose() } }
-            }
-            Text { attr { text("选择 Agent 运行位置"); marginTop(16f); fontSize(13f); color(tokens.secondaryText) } }
+                attr { flexDirectionColumn(); paddingBottom(12f) }
+            Text { attr { text("选择 Agent 运行位置"); marginTop(8f); fontSize(13f); color(tokens.secondaryText) } }
             View {
                 attr { height(42f); marginTop(8f); flexDirectionRow(); borderRadius(8f); backgroundColor(tokens.surfaceVariant); padding(4f) }
                 View {
@@ -102,6 +98,7 @@ internal fun ViewContainer<*, *>.DshConnectionSettingsModal(
                 }
                 View { attr { marginTop(18f); height(40f); flexDirectionRow(); justifyContentFlexEnd() }; Button { attr { width(132f); height(40f); borderRadius(8f); backgroundColor(if (busy()) tokens.primaryDisabled else tokens.primary); titleAttr { text(if (busy()) "连接中..." else "保存并连接"); fontSize(14f); color(tokens.onPrimary) } }; event { click { if (!busy()) onSave() } } } }
             }
+            }
         }
     }
 }
@@ -138,23 +135,7 @@ internal fun ViewContainer<*, *>.DshCredentialSetupModal(
     onSave: () -> Unit,
     onClose: () -> Unit,
 ) {
-    Modal(inWindow = true) {
-        attr {
-            absolutePositionAllZero()
-            allCenter()
-            paddingLeft(20f)
-            paddingRight(20f)
-            backgroundColor(tokens.scrim)
-        }
-        View {
-            attr {
-                width(pagerData.pageViewWidth - 40f)
-                maxWidth(420f)
-                flexDirectionColumn()
-                padding(24f)
-                borderRadius(18f)
-                backgroundColor(tokens.surface)
-            }
+    DshDialogModal(busy = busy, onClose = onClose) {
             View {
                 attr {
                     height(32f)
@@ -172,13 +153,14 @@ internal fun ViewContainer<*, *>.DshCredentialSetupModal(
                 }
                 View {
                     attr {
-                        size(32f, 32f)
+                        size(44f, 44f)
                         allCenter()
                     }
                     Image {
                         attr {
                             src(ImageUri.commonAssets("x.svg"))
                             size(20f, 20f)
+                            tintColor(tokens.icon)
                         }
                     }
                     DshHitButton { if (!busy()) onClose() }
@@ -242,29 +224,12 @@ internal fun ViewContainer<*, *>.DshCredentialSetupModal(
                     }
                 }
             }
-            View {
-                attr {
-                    marginTop(24f)
-                    height(40f)
-                    flexDirectionRow()
-                    justifyContentFlexEnd()
-                }
-                Button {
-                    attr {
-                        width(132f)
-                        height(40f)
-                        borderRadius(8f)
-                        backgroundColor(if (busy()) tokens.primaryDisabled else tokens.primary)
-                        titleAttr {
-                            text(if (busy()) "保存中..." else "保存并继续")
-                            fontSize(14f)
-                            color(tokens.onPrimary)
-                        }
-                    }
-                    event { click { if (!busy()) onSave() } }
-                }
-            }
-        }
+            DshDialogActions(
+                confirmTitle = { if (busy()) "保存中..." else "保存并继续" },
+                busy = busy,
+                onCancel = onClose,
+                onConfirm = onSave,
+            )
     }
 }
 
@@ -289,17 +254,14 @@ internal fun ViewContainer<*, *>.DshSessionDrawer(
     isWebTimeline: () -> Boolean,
     activeId: () -> String,
     onClose: () -> Unit,
-    onOpenSettings: () -> Unit,
-    onOpenAppearance: () -> Unit,
-    onOpenPlugins: () -> Unit,
-    onOpenLogs: () -> Unit,
+    onOpenConnection: () -> Unit,
+    onOpenAppSettings: () -> Unit,
     onNewSession: () -> Unit,
     onOpenArchived: () -> Unit,
     sort: () -> DshSessionSort,
     onSort: (DshSessionSort) -> Unit,
     onManage: (String) -> Unit,
     onSelect: (String) -> Unit,
-    onPan: (PanGestureParams) -> Unit = {},
 ) {
     View {
         attr {
@@ -310,9 +272,7 @@ internal fun ViewContainer<*, *>.DshSessionDrawer(
             paddingRight(14f)
             paddingBottom(18f)
             backgroundColor(tokens.background)
-            capture(CaptureRule.pan(CaptureRuleDirection.HORIZONTAL))
         }
-        event { dshFollowPan(onPan) }
             View {
                 attr {
                     height(48f)
@@ -361,17 +321,17 @@ internal fun ViewContainer<*, *>.DshSessionDrawer(
                     borderRadius(9f)
                     backgroundColor(Color.TRANSPARENT)
                 }
-                Image { attr { src(ImageUri.commonAssets("appearance.svg")); size(20f, 20f); tintColor(tokens.icon) } }
+                Image { attr { src(ImageUri.commonAssets("link.svg")); size(20f, 20f); tintColor(tokens.icon) } }
                 Text {
                     attr {
-                        text("外观")
+                        text("连接")
                         marginLeft(10f)
                         fontSize(14f)
                         fontWeightMedium()
                         color(tokens.secondaryText)
                     }
                 }
-                event { click { onOpenAppearance() } }
+                event { click { onOpenConnection() } }
             }
             View {
                 attr {
@@ -384,53 +344,7 @@ internal fun ViewContainer<*, *>.DshSessionDrawer(
                     borderRadius(9f)
                     backgroundColor(Color.TRANSPARENT)
                 }
-                Image { attr { src(ImageUri.commonAssets("plugin.svg")); size(20f, 20f); tintColor(tokens.icon) } }
-                Text {
-                    attr {
-                        text("插件")
-                        marginLeft(10f)
-                        fontSize(14f)
-                        fontWeightMedium()
-                        color(tokens.secondaryText)
-                    }
-                }
-                event { click { onOpenPlugins() } }
-            }
-            View {
-                attr {
-                    height(42f)
-                    marginTop(8f)
-                    flexDirectionRow()
-                    alignItemsCenter()
-                    paddingLeft(12f)
-                    paddingRight(12f)
-                    borderRadius(9f)
-                    backgroundColor(Color.TRANSPARENT)
-                }
-                Image { attr { src(ImageUri.commonAssets("log.svg")); size(20f, 20f); tintColor(tokens.icon) } }
-                Text {
-                    attr {
-                        text("日志")
-                        marginLeft(10f)
-                        fontSize(14f)
-                        fontWeightMedium()
-                        color(tokens.secondaryText)
-                    }
-                }
-                event { click { onOpenLogs() } }
-            }
-            View {
-                attr {
-                    height(42f)
-                    marginTop(8f)
-                    flexDirectionRow()
-                    alignItemsCenter()
-                    paddingLeft(12f)
-                    paddingRight(12f)
-                    borderRadius(9f)
-                    backgroundColor(Color.TRANSPARENT)
-                }
-                Image { attr { src(ImageUri.commonAssets("sliders.svg")); size(20f, 20f); tintColor(tokens.icon) } }
+                Image { attr { src(ImageUri.commonAssets("menu.svg")); size(20f, 20f); tintColor(tokens.icon) } }
                 Text {
                     attr {
                         text("设置")
@@ -440,7 +354,7 @@ internal fun ViewContainer<*, *>.DshSessionDrawer(
                         color(tokens.secondaryText)
                     }
                 }
-                event { click { onOpenSettings() } }
+                event { click { onOpenAppSettings() } }
             }
             View {
                 attr {
@@ -631,42 +545,14 @@ internal fun ViewContainer<*, *>.DshModelPicker(
     onClose: () -> Unit,
     onSelect: (DshModelOption) -> Unit,
 ) {
-    Modal(inWindow = true) {
-        attr {
-            absolutePositionAllZero()
-            flexDirectionColumn()
-            justifyContentFlexEnd()
-            backgroundColor(tokens.scrim)
-        }
-        View {
-            attr { flex(1f) }
-            event { click { onClose() } }
-        }
-        View {
-            attr {
-                height((pagerData.pageViewHeight * 0.62f).coerceAtMost(540f))
-                flexDirectionColumn()
-                padding(18f)
-                borderRadius(20f)
-                backgroundColor(tokens.surface)
-            }
-            View {
-                attr { height(40f); flexDirectionRow(); alignItemsCenter() }
-                Text {
-                    attr {
-                        text("选择模型")
-                        fontSize(18f)
-                        fontWeightBold()
-                        color(tokens.primaryText)
-                    }
-                }
-                View { attr { flex(1f) } }
-                View {
-                    attr { size(36f, 36f); allCenter() }
-                    Image { attr { src(ImageUri.commonAssets("x.svg")); size(21f, 21f); tintColor(tokens.icon) } }
-                    event { click { onClose() } }
-                }
-            }
+    DshBottomSheetModal(
+        busy = busy,
+        heightRatio = 0.64f,
+        minHeight = 360f,
+        maxHeight = 560f,
+        onClose = onClose,
+    ) {
+            DshModalHeader(title = { "选择模型" }, subtitle = { "切换后将用于后续消息" }, onClose = onClose)
             vif({ error().isNotEmpty() }) {
                 Text {
                     attr {
@@ -728,7 +614,6 @@ internal fun ViewContainer<*, *>.DshModelPicker(
                     }
                 }
             }
-        }
     }
 }
 
@@ -1138,84 +1023,69 @@ internal fun ViewContainer<*, *>.DshSessionManageModal(
     onExportSession: () -> Unit = {},
     onClose: () -> Unit,
 ) {
-    Modal(inWindow = true) {
-        attr {
-            absolutePositionAllZero()
-            allCenter()
-            paddingLeft(20f)
-            paddingRight(20f)
-            backgroundColor(tokens.scrim)
-        }
-        event { click { onClose() } }
-        View {
-            attr {
-                width(220f)
-                paddingTop(6f)
-                paddingBottom(6f)
-                borderRadius(14f)
-                backgroundColor(tokens.surfaceElevated)
-            }
-            event { click { } }
-            vif({ !remote() }) {
+    DshBottomSheetModal(
+        heightRatio = 0.58f,
+        minHeight = 360f,
+        maxHeight = 600f,
+        onClose = onClose,
+    ) {
+        DshModalHeader(
+            title = title,
+            subtitle = { if (archived()) "已归档会话" else "会话操作" },
+            onClose = onClose,
+        )
+        vif({ !remote() }) {
+            View {
+                attr {
+                    marginTop(12f)
+                    padding(14f)
+                    backgroundColor(tokens.surfaceVariant)
+                    borderRadius(12f)
+                }
                 Text {
                     attr {
-                        text("需连接电脑上的 DSH 才能重命名、归档或删除会话。手机不会另存一套会话。")
-                        margin(16f)
+                        text("需连接电脑上的 DSH 才能管理会话。手机不会另存一套会话。")
                         fontSize(13f)
                         lineHeight(20f)
                         color(tokens.secondaryText)
                     }
                 }
             }
-            vif({ remote() }) {
-                DshSessionMenuRow("选择消息", tokens.primaryText, onSelectMessages)
-                DshSessionMenuRow("导出为 HTML", tokens.primaryText, onExportSession)
-                DshSessionMenuRow("重命名", tokens.primaryText, onRename)
-                vif({ !archived() }) {
-                    DshSessionMenuRow("归档", tokens.primaryText, onArchive)
-                }
-                vif({ archived() && canUnarchive() }) {
-                    DshSessionMenuRow("恢复", tokens.primaryText, onRestore)
-                }
-                vif({ !canUnarchive() || !canDelete() }) {
-                    Text {
-                        attr {
-                            text("恢复或永久删除需要电脑上已更新的 dsh-scan-remote 插件。")
-                            marginLeft(18f)
-                            marginRight(18f)
-                            marginTop(8f)
-                            marginBottom(8f)
-                            fontSize(12f)
-                            lineHeight(18f)
-                            color(tokens.tertiaryText)
+        }
+        vif({ remote() }) {
+            Scroller {
+                attr { flex(1f); showScrollerIndicator(false) }
+                View {
+                    attr { flexDirectionColumn() }
+                    DshSessionMenuRow("选择消息", tokens.primaryText, onSelectMessages)
+                    DshSessionMenuRow("导出为 HTML", tokens.primaryText, onExportSession)
+                    DshSessionMenuRow("重命名", tokens.primaryText, onRename)
+                    vif({ !archived() }) {
+                        DshSessionMenuRow("归档", tokens.primaryText, onArchive)
+                    }
+                    vif({ archived() && canUnarchive() }) {
+                        DshSessionMenuRow("恢复到主列表", tokens.primary, onRestore)
+                    }
+                    vif({ !canUnarchive() || !canDelete() }) {
+                        Text {
+                            attr {
+                                text("恢复或永久删除需要电脑上已更新的 dsh-scan-remote 插件。")
+                                margin(14f)
+                                fontSize(12f)
+                                lineHeight(18f)
+                                color(tokens.tertiaryText)
+                            }
                         }
                     }
-                }
-                vif({ canDelete() }) {
-                    View {
-                        attr {
-                            height(1f)
-                            marginTop(4f)
-                            marginBottom(4f)
-                            backgroundColor(tokens.divider)
-                        }
+                    vif({ canDelete() }) {
+                        View { attr { height(1f); marginTop(4f); marginBottom(4f); backgroundColor(tokens.divider) } }
+                        DshSessionMenuRow(
+                            title = if (running()) "永久删除（运行中不可用）" else "永久删除",
+                            color = if (running()) tokens.disabled.foreground else tokens.error.foreground,
+                            onClick = { if (!running()) onDelete() },
+                        )
                     }
-                    DshSessionMenuRow(
-                        title = if (running()) "删除（运行中不可用）" else "删除",
-                        color = if (running()) tokens.disabled.foreground else tokens.error.foreground,
-                        onClick = { if (!running()) onDelete() },
-                    )
                 }
-            }
-            Text {
-                attr {
-                    text("取消")
-                    height(40f)
-                    textAlignCenter()
-                    fontSize(14f)
-                    color(tokens.secondaryText)
-                }
-                event { click { onClose() } }
             }
         }
     }
@@ -1228,10 +1098,13 @@ internal fun ViewContainer<*, *>.DshSessionMenuRow(
 ) {
     View {
         attr {
-            height(44f)
-            paddingLeft(18f)
-            paddingRight(18f)
+            height(52f)
+            paddingLeft(14f)
+            paddingRight(14f)
             justifyContentCenter()
+            borderRadius(10f)
+            backgroundColor(tokens.surface)
+            marginBottom(6f)
         }
         Text {
             attr {
@@ -1252,22 +1125,7 @@ internal fun ViewContainer<*, *>.DshSessionRenameModal(
     onSave: () -> Unit,
     onClose: () -> Unit,
 ) {
-    Modal(inWindow = true) {
-        attr {
-            absolutePositionAllZero()
-            allCenter()
-            paddingLeft(20f)
-            paddingRight(20f)
-            backgroundColor(tokens.scrim)
-        }
-        View {
-            attr {
-                width(pagerData.pageViewWidth - 40f)
-                maxWidth(420f)
-                padding(20f)
-                borderRadius(16f)
-                backgroundColor(tokens.surface)
-            }
+    DshDialogModal(busy = busy, onClose = onClose) {
             Text {
                 attr {
                     text("重命名会话")
@@ -1276,106 +1134,31 @@ internal fun ViewContainer<*, *>.DshSessionRenameModal(
                     color(tokens.primaryText)
                 }
             }
-            Input {
+            View {
                 attr {
-                    height(40f)
-                    marginTop(14f)
+                    height(44f)
+                    marginTop(16f)
+                    paddingLeft(12f)
+                    paddingRight(12f)
+                    borderRadius(10f)
+                    border(Border(1f, BorderStyle.SOLID, if (error().isEmpty()) tokens.dividerStrong else tokens.error.foreground))
+                    backgroundColor(tokens.background)
+                }
+                Input {
+                    attr {
+                    flex(1f)
                     fontSize(14f)
                     color(tokens.primaryText)
                     placeholder("输入会话名称")
                     placeholderColor(tokens.tertiaryText)
                     text(draft())
                     returnKeyTypeDone()
+                    autofocus(true)
                 }
                 event {
                     textDidChange { onDraftChange(it.text) }
                     inputReturn { if (!busy()) onSave() }
                 }
-            }
-            vif({ error().isNotEmpty() }) {
-                Text {
-                    attr {
-                        text(error())
-                        marginTop(8f)
-                        fontSize(12f)
-                        lineHeight(18f)
-                        color(tokens.error.foreground)
-                    }
-                }
-            }
-            View {
-                attr {
-                    height(40f)
-                    marginTop(18f)
-                    flexDirectionRow()
-                    justifyContentFlexEnd()
-                }
-                View {
-                    attr { width(78f); height(38f); allCenter() }
-                    Text {
-                        attr {
-                            text("取消")
-                            fontSize(14f)
-                            color(tokens.secondaryText)
-                        }
-                    }
-                    event { click { if (!busy()) onClose() } }
-                }
-                View {
-                    attr { width(88f); height(38f); marginLeft(8f); allCenter() }
-                    Text {
-                        attr {
-                            text(if (busy()) "保存中..." else "保存")
-                            fontSize(14f)
-                            color(if (busy()) tokens.primaryDisabled else tokens.primary)
-                        }
-                    }
-                    event { click { if (!busy()) onSave() } }
-                }
-            }
-        }
-    }
-}
-
-internal fun ViewContainer<*, *>.DshSessionArchiveModal(
-    title: () -> String,
-    busy: () -> Boolean,
-    error: () -> String,
-    onConfirm: () -> Unit,
-    onClose: () -> Unit,
-) {
-    Modal(inWindow = true) {
-        attr {
-            absolutePositionAllZero()
-            allCenter()
-            paddingLeft(20f)
-            paddingRight(20f)
-            backgroundColor(tokens.scrim)
-        }
-        View {
-            attr {
-                width(pagerData.pageViewWidth - 40f)
-                maxWidth(420f)
-                padding(20f)
-                borderRadius(16f)
-                backgroundColor(tokens.surface)
-            }
-            Text {
-                attr {
-                    text("归档“${title()}”？")
-                    fontSize(18f)
-                    fontWeightBold()
-                    color(tokens.primaryText)
-                    lines(2)
-                }
-            }
-            Text {
-                attr {
-                    text("归档只会把此会话从主列表隐藏，不是永久删除。日志和工作区记账仍会保留，可在“已归档会话”中查看完整历史。")
-                    marginTop(10f)
-                    fontSize(13f)
-                    lineHeight(20f)
-                    color(tokens.secondaryText)
                 }
             }
             vif({ error().isNotEmpty() }) {
@@ -1389,38 +1172,13 @@ internal fun ViewContainer<*, *>.DshSessionArchiveModal(
                     }
                 }
             }
-            View {
-                attr {
-                    height(40f)
-                    marginTop(18f)
-                    flexDirectionRow()
-                    justifyContentFlexEnd()
-                }
-                Text {
-                    attr {
-                        text("取消")
-                        width(78f)
-                        height(38f)
-                        textAlignCenter()
-                        fontSize(14f)
-                        color(tokens.secondaryText)
-                    }
-                    event { click { if (!busy()) onClose() } }
-                }
-                Text {
-                    attr {
-                        text(if (busy()) "归档中..." else "确认归档")
-                        width(104f)
-                        height(38f)
-                        marginLeft(8f)
-                        textAlignCenter()
-                        fontSize(14f)
-                        color(if (busy()) tokens.disabled.foreground else tokens.error.foreground)
-                    }
-                    event { click { if (!busy()) onConfirm() } }
-                }
-            }
-        }
+            DshDialogActions(
+                confirmTitle = { if (busy()) "保存中..." else "保存" },
+                busy = busy,
+                confirmEnabled = { draft().trim().isNotEmpty() },
+                onCancel = onClose,
+                onConfirm = onSave,
+            )
     }
 }
 
@@ -1431,34 +1189,19 @@ internal fun ViewContainer<*, *>.DshSessionDeleteModal(
     onConfirm: () -> Unit,
     onClose: () -> Unit,
 ) {
-    Modal(inWindow = true) {
-        attr {
-            absolutePositionAllZero()
-            allCenter()
-            paddingLeft(20f)
-            paddingRight(20f)
-            backgroundColor(tokens.scrim)
-        }
-        View {
-            attr {
-                width(pagerData.pageViewWidth - 40f)
-                maxWidth(420f)
-                padding(20f)
-                borderRadius(16f)
-                backgroundColor(tokens.surface)
-            }
+    DshDialogModal(busy = busy, scrimTone = DshModalScrimTone.Danger, onClose = onClose) {
             Text {
                 attr {
-                    text("永久删除“${title()}”？")
+                    text("永久删除会话？")
                     fontSize(18f)
                     fontWeightBold()
                     color(tokens.primaryText)
-                    lines(2)
                 }
             }
+            DshDialogSubject(title)
             Text {
                 attr {
-                    text("这和归档不同：删除会从电脑上的 DSH 清掉会话日志，无法恢复。归档只是从主列表隐藏。")
+                    text("会话及电脑端 DSH 中的相关日志将被清除，且无法恢复。")
                     marginTop(10f)
                     fontSize(13f)
                     lineHeight(20f)
@@ -1476,38 +1219,13 @@ internal fun ViewContainer<*, *>.DshSessionDeleteModal(
                     }
                 }
             }
-            View {
-                attr {
-                    height(40f)
-                    marginTop(18f)
-                    flexDirectionRow()
-                    justifyContentFlexEnd()
-                }
-                Text {
-                    attr {
-                        text("取消")
-                        width(78f)
-                        height(38f)
-                        textAlignCenter()
-                        fontSize(14f)
-                        color(tokens.secondaryText)
-                    }
-                    event { click { if (!busy()) onClose() } }
-                }
-                Text {
-                    attr {
-                        text(if (busy()) "删除中..." else "永久删除")
-                        width(104f)
-                        height(38f)
-                        marginLeft(8f)
-                        textAlignCenter()
-                        fontSize(14f)
-                        color(if (busy()) tokens.disabled.foreground else tokens.error.foreground)
-                    }
-                    event { click { if (!busy()) onConfirm() } }
-                }
-            }
-        }
+            DshDialogActions(
+                confirmTitle = { if (busy()) "删除中..." else "永久删除" },
+                busy = busy,
+                destructive = true,
+                onCancel = onClose,
+                onConfirm = onConfirm,
+            )
     }
 }
 
@@ -1559,57 +1277,14 @@ internal fun ViewContainer<*, *>.DshArchivedSessionsModal(
     onManage: (String) -> Unit,
     onClose: () -> Unit,
 ) {
-    Modal(inWindow = true) {
-        attr {
-            absolutePositionAllZero()
-            allCenter()
-            paddingLeft(16f)
-            paddingRight(16f)
-            backgroundColor(tokens.scrim)
-        }
-        event { click { onClose() } }
+    DshFullScreenModal {
         View {
             attr {
-                width(pagerData.pageViewWidth - 32f)
-                maxWidth(520f)
-                height((pagerData.pageViewHeight - 80f).coerceAtMost(620f))
-                padding(18f)
-                borderRadius(16f)
+                flex(1f)
+                flexDirectionColumn()
                 backgroundColor(tokens.background)
             }
-            event { click { } }
-            View {
-                attr {
-                    height(44f)
-                    flexDirectionRow()
-                    alignItemsCenter()
-                }
-                Text {
-                    attr {
-                        text("已归档会话")
-                        flex(1f)
-                        fontSize(18f)
-                        fontWeightBold()
-                        color(tokens.primaryText)
-                    }
-                }
-                View {
-                    attr {
-                        width(52f)
-                        height(36f)
-                        allCenter()
-                    }
-                    Text {
-                        attr {
-                            text("关闭")
-                            fontSize(13f)
-                            color(tokens.primary)
-                        }
-                    }
-                    event { click { onClose() } }
-                    DshHitButton { onClose() }
-                }
-            }
+            DshModalHeader(title = { "已归档会话" }, subtitle = { "${sessions().size} 个会话" }, onClose = onClose)
             Text {
                 attr {
                     text("这些会话仅从主列表隐藏，历史记录仍完整保留。")
@@ -1664,38 +1339,18 @@ internal fun ViewContainer<*, *>.DshWorkspaceBrowserModal(
     onAdopt: () -> Unit,
     onClose: () -> Unit,
 ) {
-    Modal(inWindow = true) {
-        attr {
-            absolutePositionAllZero()
-            allCenter()
-            paddingLeft(20f)
-            paddingRight(20f)
-            backgroundColor(tokens.scrim)
-        }
+    DshFullScreenModal {
         View {
             attr {
-                width(pagerData.pageViewWidth - 40f)
-                maxWidth(560f)
-                maxHeight(pagerData.pageViewHeight - 80f)
+                flex(1f)
                 flexDirectionColumn()
-                padding(18f)
-                borderRadius(16f)
-                backgroundColor(tokens.surface)
+                backgroundColor(tokens.background)
             }
-            View {
-                attr { height(36f); flexDirectionRow(); alignItemsCenter() }
-                Text {
-                    attr {
-                        text(if (path().isEmpty()) home() else path())
-                        flex(1f)
-                        lines(1)
-                        fontSize(17f)
-                        fontWeightBold()
-                        color(tokens.primaryText)
-                    }
-                }
-                View { attr { size(32f, 32f); allCenter() }; Image { attr { src(ImageUri.commonAssets("x.svg")); size(20f, 20f); tintColor(tokens.icon) } }; DshHitButton { onClose() } }
-            }
+            DshModalHeader(
+                title = { "选择工作区" },
+                subtitle = { if (path().isEmpty()) home() else path() },
+                onClose = { if (!busy()) onClose() },
+            )
             Scroller {
                 attr {
                     flex(1f)
@@ -1706,7 +1361,7 @@ internal fun ViewContainer<*, *>.DshWorkspaceBrowserModal(
                 vfor({ entries() }) { entry ->
                     View {
                         attr {
-                            height(42f)
+                            height(48f)
                             flexDirectionRow()
                             alignItemsCenter()
                             paddingLeft(10f)
@@ -1728,42 +1383,125 @@ internal fun ViewContainer<*, *>.DshWorkspaceBrowserModal(
             vif({ error().isNotEmpty() }) {
                 Text { attr { text(error()); marginTop(8f); fontSize(12f); color(tokens.error.foreground) } }
             }
-            Input {
+            View {
                 attr {
-                    height(38f)
+                    height(44f)
                     marginTop(10f)
-                    fontSize(14f)
-                    placeholder("新目录名称")
-                    placeholderColor(tokens.tertiaryText)
+                    paddingLeft(12f)
+                    paddingRight(12f)
+                    borderRadius(10f)
+                    border(Border(1f, BorderStyle.SOLID, tokens.dividerStrong))
+                    backgroundColor(tokens.surface)
                 }
-                event { textDidChange { onNewNameChange(it.text) } }
+                Input {
+                    attr {
+                        flex(1f)
+                        fontSize(14f)
+                        color(tokens.primaryText)
+                        placeholder("新目录名称")
+                        placeholderColor(tokens.tertiaryText)
+                    }
+                    event { textDidChange { onNewNameChange(it.text) } }
+                }
             }
             View {
-                attr { height(42f); marginTop(12f); flexDirectionRow(); justifyContentFlexEnd() }
-                Text {
-                    attr {
-                        text(if (busy()) "处理中..." else "新建目录")
-                        width(88f)
-                        height(38f)
-                        textAlignCenter()
-                        fontSize(13f)
-                        color(tokens.secondaryText)
-                    }
-                    event { click { if (!busy()) onCreateDirectory() } }
+                attr { height(48f); marginTop(12f); flexDirectionRow() }
+                View {
+                    attr { flex(1f); height(44f); allCenter(); borderRadius(10f); backgroundColor(tokens.surfaceVariant) }
+                    Text { attr { text(if (busy()) "处理中..." else "新建目录"); fontSize(14f); color(tokens.secondaryText) } }
+                    DshHitButton { if (!busy()) onCreateDirectory() }
                 }
-                Text {
+                Button {
                     attr {
-                        text(if (busy()) "处理中..." else "使用此目录")
-                        width(112f)
-                        height(38f)
+                        flex(1f)
+                        height(44f)
                         marginLeft(8f)
-                        textAlignCenter()
-                        fontSize(13f)
-                        color(tokens.primary)
+                        borderRadius(10f)
+                        backgroundColor(if (busy()) tokens.primaryDisabled else tokens.primary)
+                        titleAttr { text(if (busy()) "处理中..." else "使用此目录"); fontSize(14f); color(tokens.onPrimary) }
                     }
                     event { click { if (!busy()) onAdopt() } }
                 }
             }
         }
+    }
+}
+
+internal fun ViewContainer<*, *>.DshWorkspaceRenameModal(
+    draft: () -> String,
+    busy: () -> Boolean,
+    error: () -> String,
+    onDraftChange: (String) -> Unit,
+    onSave: () -> Unit,
+    onClose: () -> Unit,
+) {
+    DshDialogModal(busy = busy, onClose = onClose) {
+        Text { attr { text("重命名工作区"); fontSize(18f); fontWeightBold(); color(tokens.primaryText) } }
+        View {
+            attr {
+                height(44f)
+                marginTop(16f)
+                paddingLeft(12f)
+                paddingRight(12f)
+                borderRadius(10f)
+                border(Border(1f, BorderStyle.SOLID, if (error().isEmpty()) tokens.dividerStrong else tokens.error.foreground))
+                backgroundColor(tokens.background)
+            }
+            Input {
+                attr {
+                    flex(1f)
+                    fontSize(14f)
+                    color(tokens.primaryText)
+                    placeholder("工作区名称")
+                    placeholderColor(tokens.tertiaryText)
+                    text(draft())
+                    autofocus(true)
+                    returnKeyTypeDone()
+                }
+                event {
+                    textDidChange { onDraftChange(it.text) }
+                    inputReturn { if (!busy()) onSave() }
+                }
+            }
+        }
+        vif({ error().isNotEmpty() }) {
+            Text { attr { text(error()); marginTop(8f); fontSize(12f); color(tokens.error.foreground) } }
+        }
+        DshDialogActions(
+            confirmTitle = { if (busy()) "保存中..." else "保存" },
+            busy = busy,
+            confirmEnabled = { draft().trim().isNotEmpty() },
+            onCancel = onClose,
+            onConfirm = onSave,
+        )
+    }
+}
+
+internal fun ViewContainer<*, *>.DshWorkspaceDeleteModal(
+    busy: () -> Boolean,
+    error: () -> String,
+    onConfirm: () -> Unit,
+    onClose: () -> Unit,
+) {
+    DshDialogModal(busy = busy, onClose = onClose) {
+        Text { attr { text("移除工作区注册？"); fontSize(18f); fontWeightBold(); color(tokens.primaryText) } }
+        Text {
+            attr {
+                text("只会从工作区列表移除注册，不会删除目录、会话或日志。")
+                marginTop(10f)
+                fontSize(13f)
+                lineHeight(20f)
+                color(tokens.secondaryText)
+            }
+        }
+        vif({ error().isNotEmpty() }) {
+            Text { attr { text(error()); marginTop(8f); fontSize(12f); color(tokens.error.foreground) } }
+        }
+        DshDialogActions(
+            confirmTitle = { if (busy()) "处理中..." else "移除注册" },
+            busy = busy,
+            onCancel = onClose,
+            onConfirm = onConfirm,
+        )
     }
 }
