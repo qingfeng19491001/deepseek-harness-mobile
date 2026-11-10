@@ -1,9 +1,10 @@
-package com.example.dsh.dsh
+package com.example.dsh.connection
+
+import com.example.dsh.dsh.DshConnectionMode
 
 /**
- * Small lifecycle gate for asynchronous engine and tunnel callbacks.
- * The native managers keep their own generations; this gate protects the
- * page from callbacks belonging to a previous mode or connection attempt.
+ * 连接 generation。一次连接尝试一个值，用来挡住上一次 SSH / Relay 回调。
+ * 它不表示宿主 WebSocket 通道，通道 generation 仍在 `DshHostConnectionRuntime`。
  */
 internal class DshConnectionCoordinator {
     private var generation = 0L

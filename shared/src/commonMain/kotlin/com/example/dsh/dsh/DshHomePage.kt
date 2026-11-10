@@ -1,6 +1,27 @@
 package com.example.dsh.dsh
 
 import com.example.dsh.base.BasePager
+import com.example.dsh.connection.DshConnection
+import com.example.dsh.connection.DshConnectionEvents
+import com.example.dsh.session.ConversationAction
+import com.example.dsh.session.ConversationCoordinator
+import com.example.dsh.session.FlushedText
+import com.example.dsh.session.HistoryFinish
+import com.example.dsh.session.HistoryResume
+import com.example.dsh.session.HomeSession
+import com.example.dsh.session.ResyncPlan
+import com.example.dsh.session.SendChannel
+import com.example.dsh.session.SendPlan
+import com.example.dsh.session.SendRequest
+import com.example.dsh.session.SettledStream
+import com.example.dsh.session.SessionHistory
+import com.example.dsh.session.SessionHistoryHost
+import com.example.dsh.session.SessionSwitch
+import com.example.dsh.session.SplitText
+import com.example.dsh.session.StreamCursor
+import com.example.dsh.host.parser.contextSummary
+import com.example.dsh.host.repository.DshRemoteRepository
+import com.example.dsh.host.runtime.DshHostConnection
 import com.example.dsh.base.bridgeModule
 import com.example.dsh.theme.theme
 import com.example.dsh.theme.tokens
@@ -48,67 +69,140 @@ private const val FOLLOW_LIST_SLACK_PX = 72f
 /** First usable DSH surface: local sessions, streaming Markdown, and a composer. */
 @Page("home")
 internal class DshHomePage : BasePager() {
-    private var repository: DshRepository? = null
     private var localStore: DshLocalStore? = null
-    private var engineModule: DshEngineModule? = null
-    private var engineReady = false
-    private var relayEngineEndpoint = ""
-    private var pendingApiKey = ""
-    private var connectionMode by observable(DshConnectionMode.RELAY)
+    private val connection = DshConnection(this, HomeConnectionEvents()) { localStore }
+    private val session = HomeSession(this)
+    private val history = SessionHistory(PageHistoryHost())
+    private val home
+        get() = session.home
+    private var repository: DshRepository?
+        get() = connection.repository
+        set(value) { connection.repository = value }
+    private var engineReady: Boolean
+        get() = connection.engineReady
+        set(value) { connection.engineReady = value }
+    private var pendingApiKey: String
+        get() = connection.pendingApiKey
+        set(value) { connection.pendingApiKey = value }
+    private var connectionMode: DshConnectionMode
+        get() = connection.connectionMode
+        set(value) { connection.connectionMode = value }
     private val sshMode: Boolean
-        get() = connectionMode == DshConnectionMode.SSH
+        get() = connection.sshMode
     private val isRemoteHost: Boolean
         get() = connectionMode == DshConnectionMode.RELAY || connectionMode == DshConnectionMode.SSH
-    private var remoteProfileId by observable(DshSessionScope.DEFAULT_REMOTE_PROFILE_ID)
-    private var sshHost by observable("")
-    private var sshUser by observable("")
-    private var sshPort by observable("22")
-    private var sshDshPort by observable("3080")
-    private var sshKeyId by observable("")
-    private var sshFingerprint by observable("")
-    private var sshKeyLabel by observable("未导入私钥")
-    private var sshKeyPassphrase by observable("")
-    private var sshSettingsVisible by observable(false)
-    private var sshSettingsBusy by observable(false)
-    private var sshSettingsError by observable("")
+    private var remoteProfileId: String
+        get() = connection.remoteProfileId
+        set(value) { connection.remoteProfileId = value }
+    private var sshHost: String
+        get() = connection.sshHost
+        set(value) { connection.sshHost = value }
+    private var sshUser: String
+        get() = connection.sshUser
+        set(value) { connection.sshUser = value }
+    private var sshPort: String
+        get() = connection.sshPort
+        set(value) { connection.sshPort = value }
+    private var sshDshPort: String
+        get() = connection.sshDshPort
+        set(value) { connection.sshDshPort = value }
+    private var sshKeyId: String
+        get() = connection.sshKeyId
+        set(value) { connection.sshKeyId = value }
+    private var sshFingerprint: String
+        get() = connection.sshFingerprint
+        set(value) { connection.sshFingerprint = value }
+    private var sshKeyLabel: String
+        get() = connection.sshKeyLabel
+        set(value) { connection.sshKeyLabel = value }
+    private var sshKeyPassphrase: String
+        get() = connection.sshKeyPassphrase
+        set(value) { connection.sshKeyPassphrase = value }
+    private var sshSettingsVisible: Boolean
+        get() = connection.sshSettingsVisible
+        set(value) { connection.sshSettingsVisible = value }
+    private var sshSettingsBusy: Boolean
+        get() = connection.sshSettingsBusy
+        set(value) { connection.sshSettingsBusy = value }
+    private var sshSettingsError: String
+        get() = connection.sshSettingsError
+        set(value) { connection.sshSettingsError = value }
     private val sessionScope: DshSessionScope
         get() = DshSessionScope(connectionMode, remoteProfileId)
     private val activeConnectionId: String
         get() = sessionScope.storageKey
 
-    private var sessions by observableList<DshSession>()
-    private val visibleSessions by observableList<DshSession>()
-    private val archivedSessions by observableList<DshSession>()
+    private val sessions
+        get() = home.sessions
+    private val visibleSessions
+        get() = home.visibleSessions
+    private val archivedSessions
+        get() = home.archivedSessions
+    private val workspaceGroups
+        get() = home.workspaceGroups
     private var archivedSessionsVisible by observable(false)
-    private var activeSessionArchived by observable(false)
+    private val activeSessionArchived: Boolean
+        get() = home.activeSessionArchived
     private var sessionManageTargetId by observable("")
     private var sessionRenameTargetId by observable("")
     private var sessionRenameDraft by observable("")
     private var sessionArchiveTargetId by observable("")
     private var sessionDeleteTargetId by observable("")
-    private var sessionActionBusy by observable(false)
-    private var sessionActionError by observable("")
-    private var sessionSort by observable(DshSessionSort.RECENT)
-    private var canUnarchive by observable(false)
-    private var canDeleteSession by observable(false)
-    private var sessionUndoId by observable("")
-    private var sessionUndoTitle by observable("")
-    private var messages by observableList<DshMessage>()
+    private var sessionActionBusy: Boolean
+        get() = home.sessionActionBusy
+        set(value) { home.sessionActionBusy = value }
+    private var sessionActionError: String
+        get() = home.sessionActionError
+        set(value) { home.sessionActionError = value }
+    private var sessionSort: DshSessionSort
+        get() = home.sessionSort
+        set(value) { home.sessionSort = value }
+    private var canUnarchive: Boolean
+        get() = home.canUnarchive
+        set(value) { home.canUnarchive = value }
+    private var canDeleteSession: Boolean
+        get() = home.canDeleteSession
+        set(value) { home.canDeleteSession = value }
+    private var sessionUndoId: String
+        get() = home.sessionUndoId
+        set(value) { home.sessionUndoId = value }
+    private var sessionUndoTitle: String
+        get() = home.sessionUndoTitle
+        set(value) { home.sessionUndoTitle = value }
+    private var messages: com.tencent.kuikly.core.reactive.collection.ObservableList<DshMessage>
+        get() = session.conversation.messages
+        set(value) { session.conversation.messages = value }
     private var conversationPanelIds by observableList<String>()
-    private var activeSessionId by observable("session-1")
+    private var activeSessionId: String
+        get() = home.activeSessionId
+        set(value) { home.activeSessionId = value }
     private var preferBlankHomeOnNextLoad = true
-    private var draft by observable("")
-    private var streaming by observable(false)
-    private var stopButtonVisible by observable(false)
+    private var draft: String
+        get() = session.conversation.draft
+        set(value) { session.conversation.draft = value }
+    private var streaming: Boolean
+        get() = session.conversation.streaming
+        set(value) { session.conversation.streaming = value }
+    private var stopButtonVisible: Boolean
+        get() = session.conversation.stopButtonVisible
+        set(value) { session.conversation.stopButtonVisible = value }
 
     /** 本轮实时追加、尚未做过进场动画的消息 id；历史加载与重建不进这里。 */
     private val freshMessageIds = mutableSetOf<String>()
-    private var streamingAssistantContent by observable("")
+    private var streamingAssistantContent: String
+        get() = session.conversation.streamingAssistantContent
+        set(value) { session.conversation.streamingAssistantContent = value }
     private var keyboardHeight by observable(0f)
     private var keyboardAnimation by observable(Animation.easeInOut(ANIMATION_DURATION_S))
-    private var connectionLabel by observable("本地内核启动中")
-    private var apiKeyDraft by observable("")
-    private var credentialSetupVisible by observable(false)
+    private var connectionLabel: String
+        get() = connection.connectionLabel
+        set(value) { connection.connectionLabel = value }
+    private var apiKeyDraft: String
+        get() = connection.apiKeyDraft
+        set(value) { connection.apiKeyDraft = value }
+    private var credentialSetupVisible: Boolean
+        get() = connection.credentialSetupVisible
+        set(value) { connection.credentialSetupVisible = value }
     private var appSettingsHubVisible by observable(false)
     private var appearanceVisible by observable(false)
     private var logCenterVisible by observable(false)
@@ -139,9 +233,15 @@ internal class DshHomePage : BasePager() {
     private var selectedMessageCount by observable(0)
     private var messageOverflowVisible by observable(false)
     private var pendingEnterSelectSessionId = ""
-    private var credentialSetupBusy by observable(false)
-    private var credentialSetupError by observable("")
-    private var credentialSetupTitle by observable("添加一个 API Key 开始使用")
+    private var credentialSetupBusy: Boolean
+        get() = connection.credentialSetupBusy
+        set(value) { connection.credentialSetupBusy = value }
+    private var credentialSetupError: String
+        get() = connection.credentialSetupError
+        set(value) { connection.credentialSetupError = value }
+    private var credentialSetupTitle: String
+        get() = connection.credentialSetupTitle
+        set(value) { connection.credentialSetupTitle = value }
     private var sessionDrawerProgress by observable(0f)
     private var sessionDrawerDragging by observable(false)
     private var sessionDrawerSettling by observable(false)
@@ -166,8 +266,11 @@ internal class DshHomePage : BasePager() {
     private var selectedModelLabel by observable("选择模型")
     private var modelOptions by observableList<DshModelOption>()
     private var attachmentSheetVisible by observable(false)
-    private val draftImages by observableList<DshDraftImage>()
-    private var attachmentsSending by observable(false)
+    private val draftImages
+        get() = session.conversation.draftImages
+    private var attachmentsSending: Boolean
+        get() = session.conversation.attachmentsSending
+        set(value) { session.conversation.attachmentsSending = value }
     private var imageLimitsKnown by observable(false)
     private var imageLimits: DshImageLimits? = null
     private var pendingSendImages = emptyList<DshDraftImage>()
@@ -178,6 +281,8 @@ internal class DshHomePage : BasePager() {
     private var imagePreviewAttachmentId = ""
     private var imagePreviewDraftLocalId by observable("")
     private var voiceActive by observable(false)
+    // 语音播报开关：目前仅做 UI 状态预留，后续接 TTS 播报能力
+    private var voiceBroadcastEnabled by observable(false)
     private var topBarRef: ViewRef<com.tencent.kuikly.core.views.DivView>? = null
     private var inputView: TextAreaView? = null
     private var apiKeyInputView: InputView? = null
@@ -194,7 +299,9 @@ internal class DshHomePage : BasePager() {
     private val pendingLocalMessageReads = mutableSetOf<String>()
     private val sessionCacheStates = mutableMapOf<String, DshSessionCacheState>()
     private var inputFocused = false
-    private var streamingAssistantId by observable("")
+    private var streamingAssistantId: String
+        get() = session.conversation.streamingAssistantId
+        set(value) { session.conversation.streamingAssistantId = value }
     // The root id guards callbacks from an old request; the visible id points
     // at the current text segment between ordered tool cards.
     private var streamingAssistantRootId = ""
@@ -210,7 +317,6 @@ internal class DshHomePage : BasePager() {
     private var followListTail = true
     private var perfTraceSequence = 0
     private var preloadTraceSequence = 0
-    private val connectionCoordinator = DshConnectionCoordinator()
     private val webDisclosureStates = mutableMapOf<String, Boolean>()
     private val webBodyDisclosureStates = mutableMapOf<String, Boolean>()
     private val webJsonNodeStates = mutableMapOf<String, Boolean>()
@@ -225,7 +331,6 @@ internal class DshHomePage : BasePager() {
     private var jobsPanelExpanded by observable(false)
     private var jobsNow by observable(0L)
     private var jobsClockScheduled by observable(false)
-    private val workspaceGroups by observableList<DshWorkspaceGroup>()
     private val skills by observableList<DshSkill>()
     private var goalSnapshot by observable<DshGoalSnapshot?>(null)
     private var goalActionBusy by observable(false)
@@ -294,7 +399,8 @@ internal class DshHomePage : BasePager() {
 
     override fun pageWillDestroy() {
         drawerMotionGeneration++
-        stopCurrentEngine()
+        session.dispose()
+        connection.dispose()
         localReadScope.cancel()
         super.pageWillDestroy()
     }
@@ -302,6 +408,118 @@ internal class DshHomePage : BasePager() {
     override fun body(): ViewBuilder {
         val ctx = this
         val wide = pagerData.pageViewWidth >= 720f
+
+        fun ViewContainer<*, *>.conversation(width: Float) {
+            DshConversation(
+                snapshot = ConversationSnapshot(
+                conversationIds = { ctx.conversationPanelIds },
+                activeConversationId = { ctx.activeSessionId },
+                messagesForSession = { ctx.sessionMessageState(it) },
+                streaming = { ctx.streaming },
+                streamingMessageId = { ctx.streamingAssistantId },
+                streamingContent = { ctx.streamingAssistantContent },
+                draft = { ctx.draft },
+                skills = { ctx.skills },
+                keyboardHeight = { ctx.keyboardHeight },
+                stopButtonVisible = { ctx.stopButtonVisible },
+                keyboardAnimation = { ctx.keyboardAnimation },
+                modelLabel = { ctx.selectedModelLabel },
+                voiceActive = { ctx.voiceActive },
+                draftImages = { ctx.draftImages },
+                attachmentsSending = { ctx.attachmentsSending },
+                isWebTimeline = { ctx.isRemoteHost },
+                isDisclosureExpanded = { ctx.isWebDisclosureExpanded(it) },
+                isBodyDisclosureExpanded = { ctx.isWebBodyDisclosureExpanded(it) },
+                isJsonNodeExpanded = { messageId, nodeId ->
+                                    ctx.isWebJsonNodeExpanded(messageId, nodeId)
+                                },
+                selectMode = { ctx.messageSelectMode },
+                selectedRevision = { ctx.selectedMessageRevision },
+                isMessageSelected = { ctx.selectedMessageIds.contains(it) },
+                selectedCount = { ctx.selectedMessageCount },
+                attachmentDataUrl = { ctx.attachmentDataUrl(it) },
+                queueItems = { ctx.queueItems },
+                jobItems = { ctx.jobItems },
+                goal = { ctx.goalSnapshot },
+                goalActionBusy = { ctx.goalActionBusy },
+                goalActionError = { ctx.goalActionError },
+                jobsPanelExpanded = { ctx.jobsPanelExpanded },
+                jobsNow = { ctx.jobsNow },
+                queueExpanded = { ctx.queueDockExpanded },
+                queueEditingId = { ctx.queueEditingId },
+                queueActionBusy = { ctx.queueActionBusy },
+                queueEditingText = { ctx.queueEditingText },
+                sessionRunning = { ctx.sessionRunning },
+                isBlankConversation = { ctx.isBlankSession() },
+                conversationListEpoch = { ctx.conversationListEpochFor(it) },
+                turnReconnecting = { isReconnectLabel(ctx.connectionLabel) },
+                turnElapsedMs = { ctx.turnElapsedMs },
+                pendingApproval = { ctx.pendingApproval },
+                pendingQuestion = { ctx.pendingQuestion },
+                interactionBusy = { ctx.interactionBusy },
+                selectedQuestionOptions = { ctx.selectedQuestionOptions },
+                questionCustom = { ctx.questionCustom },
+                questionIndex = { ctx.questionIndex },
+                questionError = { ctx.questionError },
+                availableWidth = width,
+            ),
+                actions = ConversationActions(
+                scrollerRef = { id, ref -> ctx.messageScrollerRefs[id] = ref },
+                messageRef = { sessionId, messageId, ref ->
+                                    ctx.messageRowRefs[ctx.messageRowKey(sessionId, messageId)] = ref
+                                },
+                onPickSkill = { ctx.draft = "/$it " },
+                inputRef = { ctx.inputView = it.view },
+                onInputFocusChange = { ctx.inputFocused = it },
+                onDraftChange = { ctx.draft = it },
+                onKeyboardHeightChange = { ctx.updateKeyboard(it) },
+                onSend = { ctx.sendDraft() },
+                onStop = { ctx.stopStream() },
+                onDismissKeyboard = { ctx.dismissKeyboard() },
+                onUserListScroll = { ctx.onConversationUserScroll(it) },
+                onOpenModels = { ctx.openModelPicker() },
+                onToggleAttachments = { ctx.openAttachmentSheet() },
+                onToggleVoice = { ctx.toggleVoice() },
+                onPreviewDraftImage = { ctx.previewDraftImage(it) },
+                onRemoveDraftImage = { ctx.removeDraftImage(it) },
+                onRetryDraftImage = { ctx.retryDraftImage(it) },
+                onPreviewAttachment = { ctx.previewAttachment(it) },
+                onToggleDisclosure = { ctx.toggleWebDisclosure(it) },
+                onToggleBodyDisclosure = { ctx.toggleWebBodyDisclosure(it) },
+                onToggleJsonNode = { messageId, nodeId ->
+                                    ctx.toggleWebJsonNode(messageId, nodeId)
+                                },
+                onCopyToolContent = {
+                                    ctx.copyPlainText(it)
+                                },
+                onCopyMessage = { ctx.copyMessage(it) },
+                onEnterSelectMode = { ctx.enterMessageSelect(it) },
+                onToggleMessageSelected = { ctx.toggleMessageSelected(it) },
+                onCopySelected = { ctx.copySelectedMessages() },
+                onExportSelected = { ctx.exportSelectedMessages() },
+                onPauseGoal = { ctx.pauseGoal() },
+                onResumeGoal = { ctx.resumeGoal() },
+                onEditGoal = { text, done -> ctx.editGoal(text, done) },
+                onClearGoal = { ctx.clearGoal() },
+                onToggleJobsPanel = { ctx.toggleJobsPanel() },
+                onToggleQueue = { ctx.queueDockExpanded = !ctx.queueDockExpanded },
+                onEditQueueItem = { ctx.editQueueItem(it) },
+                onQueueEditingTextChange = { ctx.queueEditingText = it },
+                onSaveQueueItem = { ctx.saveQueueItem(it) },
+                onCancelQueueItemEdit = { ctx.cancelQueueItemEdit() },
+                onRemoveQueueItem = { ctx.removeQueueItem(it) },
+                onSteerQueueItem = { ctx.steerQueueItem(it) },
+                onAnswerApproval = { ctx.answerApproval(it) },
+                onToggleQuestionOption = { ctx.toggleQuestionOption(it) },
+                onQuestionCustomChange = { ctx.updateQuestionCustom(it) },
+                onQuestionNavigate = { ctx.navigateQuestion(it) },
+                onQuestionSkip = { ctx.skipQuestion() },
+                onSubmitQuestion = { ctx.submitQuestion() },
+                consumeFreshMessage = { ctx.consumeFreshMessage(it) },
+            ),
+            )
+        }
+
         return {
             ctx.perfLog("body.builder.begin")
             View {
@@ -369,6 +587,14 @@ internal class DshHomePage : BasePager() {
                         },
                         onCancelSelect = { ctx.exitMessageSelect() },
                         onToggleSelectAll = { ctx.toggleSelectAllMessages() },
+                        voiceBroadcast = { ctx.voiceBroadcastEnabled },
+                        onToggleVoiceBroadcast = {
+                            ctx.voiceBroadcastEnabled = !ctx.voiceBroadcastEnabled
+                        },
+                        onNewSession = {
+                            ctx.dismissKeyboard()
+                            ctx.createSession()
+                        },
                     )
                 }
 
@@ -402,110 +628,7 @@ internal class DshHomePage : BasePager() {
                             } else {
                                 ctx.pagerData.pageViewWidth
                             }
-                            DshConversation(
-                                conversationIds = { ctx.conversationPanelIds },
-                                activeConversationId = { ctx.activeSessionId },
-                                messagesForSession = { ctx.sessionMessageState(it) },
-                                streaming = { ctx.streaming },
-                                streamingMessageId = { ctx.streamingAssistantId },
-                                streamingContent = { ctx.streamingAssistantContent },
-                                scrollerRef = { id, ref -> ctx.messageScrollerRefs[id] = ref },
-                                messageRef = { sessionId, messageId, ref ->
-                                    ctx.messageRowRefs[ctx.messageRowKey(sessionId, messageId)] = ref
-                                },
-                                draft = { ctx.draft },
-                                skills = { ctx.skills },
-                                onPickSkill = { ctx.draft = "/$it " },
-                                keyboardHeight = { ctx.keyboardHeight },
-                                stopButtonVisible = { ctx.stopButtonVisible },
-                                inputRef = { ctx.inputView = it.view },
-                                onInputFocusChange = { ctx.inputFocused = it },
-                                onDraftChange = { ctx.draft = it },
-                                keyboardAnimation = { ctx.keyboardAnimation },
-                                onKeyboardHeightChange = { ctx.updateKeyboard(it) },
-                                onSend = { ctx.sendDraft() },
-                                onStop = { ctx.stopStream() },
-                                onDismissKeyboard = { ctx.dismissKeyboard() },
-                                onUserListScroll = { ctx.onConversationUserScroll(it) },
-                                modelLabel = { ctx.selectedModelLabel },
-                                voiceActive = { ctx.voiceActive },
-                                draftImages = { ctx.draftImages },
-                                attachmentsSending = { ctx.attachmentsSending },
-                                onOpenModels = { ctx.openModelPicker() },
-                                onToggleAttachments = { ctx.openAttachmentSheet() },
-                                onToggleVoice = { ctx.toggleVoice() },
-                                onPreviewDraftImage = { ctx.previewDraftImage(it) },
-                                onRemoveDraftImage = { ctx.removeDraftImage(it) },
-                                onRetryDraftImage = { ctx.retryDraftImage(it) },
-                                onPreviewAttachment = { ctx.previewAttachment(it) },
-                                isWebTimeline = { ctx.isRemoteHost },
-                                isDisclosureExpanded = { ctx.isWebDisclosureExpanded(it) },
-                                onToggleDisclosure = { ctx.toggleWebDisclosure(it) },
-                                isBodyDisclosureExpanded = { ctx.isWebBodyDisclosureExpanded(it) },
-                                onToggleBodyDisclosure = { ctx.toggleWebBodyDisclosure(it) },
-                                isJsonNodeExpanded = { messageId, nodeId ->
-                                    ctx.isWebJsonNodeExpanded(messageId, nodeId)
-                                },
-                                onToggleJsonNode = { messageId, nodeId ->
-                                    ctx.toggleWebJsonNode(messageId, nodeId)
-                                },
-                                onCopyToolContent = {
-                                    ctx.copyPlainText(it)
-                                },
-                                onCopyMessage = { ctx.copyMessage(it) },
-                                onEnterSelectMode = { ctx.enterMessageSelect(it) },
-                                selectMode = { ctx.messageSelectMode },
-                                selectedRevision = { ctx.selectedMessageRevision },
-                                isMessageSelected = { ctx.selectedMessageIds.contains(it) },
-                                onToggleMessageSelected = { ctx.toggleMessageSelected(it) },
-                                selectedCount = { ctx.selectedMessageCount },
-                                onCopySelected = { ctx.copySelectedMessages() },
-                                onExportSelected = { ctx.exportSelectedMessages() },
-                                attachmentDataUrl = { ctx.attachmentDataUrl(it) },
-                                queueItems = { ctx.queueItems },
-                                jobItems = { ctx.jobItems },
-                                goal = { ctx.goalSnapshot },
-                                goalActionBusy = { ctx.goalActionBusy },
-                                goalActionError = { ctx.goalActionError },
-                                onPauseGoal = { ctx.pauseGoal() },
-                                onResumeGoal = { ctx.resumeGoal() },
-                                onEditGoal = { text, done -> ctx.editGoal(text, done) },
-                                onClearGoal = { ctx.clearGoal() },
-                                jobsPanelExpanded = { ctx.jobsPanelExpanded },
-                                jobsNow = { ctx.jobsNow },
-                                onToggleJobsPanel = { ctx.toggleJobsPanel() },
-                                queueExpanded = { ctx.queueDockExpanded },
-                                queueEditingId = { ctx.queueEditingId },
-                                queueActionBusy = { ctx.queueActionBusy },
-                                queueEditingText = { ctx.queueEditingText },
-                                sessionRunning = { ctx.sessionRunning },
-                                isBlankConversation = { ctx.isBlankSession() },
-                                conversationListEpoch = { ctx.conversationListEpochFor(it) },
-                                turnReconnecting = { isReconnectLabel(ctx.connectionLabel) },
-                                turnElapsedMs = { ctx.turnElapsedMs },
-                                onToggleQueue = { ctx.queueDockExpanded = !ctx.queueDockExpanded },
-                                onEditQueueItem = { ctx.editQueueItem(it) },
-                                onQueueEditingTextChange = { ctx.queueEditingText = it },
-                                onSaveQueueItem = { ctx.saveQueueItem(it) },
-                                onCancelQueueItemEdit = { ctx.cancelQueueItemEdit() },
-                                onRemoveQueueItem = { ctx.removeQueueItem(it) },
-                                onSteerQueueItem = { ctx.steerQueueItem(it) },
-                                pendingApproval = { ctx.pendingApproval },
-                                pendingQuestion = { ctx.pendingQuestion },
-                                interactionBusy = { ctx.interactionBusy },
-                                selectedQuestionOptions = { ctx.selectedQuestionOptions },
-                                questionCustom = { ctx.questionCustom },
-                                questionIndex = { ctx.questionIndex },
-                                questionError = { ctx.questionError },
-                                onAnswerApproval = { ctx.answerApproval(it) },
-                                onToggleQuestionOption = { ctx.toggleQuestionOption(it) },
-                                onQuestionCustomChange = { ctx.updateQuestionCustom(it) },
-                                onQuestionNavigate = { ctx.navigateQuestion(it) },
-                                onQuestionSkip = { ctx.skipQuestion() },
-                                onSubmitQuestion = { ctx.submitQuestion() },
-                                availableWidth = centerWidth,
-                                consumeFreshMessage = { ctx.consumeFreshMessage(it) },
-                            )
+                            conversation(centerWidth)
                             vif({ ctx.isRemoteHost }) {
                                 DshSessionDetailsPanel(
                                     title = { ctx.sessions.firstOrNull { it.id == ctx.activeSessionId }?.title ?: "尚无标题" },
@@ -530,110 +653,7 @@ internal class DshHomePage : BasePager() {
                         ctx.perfLog("body.conversation.end wide=true")
                     } else {
                         ctx.perfLog("body.conversation.begin wide=false panels=${ctx.conversationPanelIds.size}")
-                        DshConversation(
-                            conversationIds = { ctx.conversationPanelIds },
-                            activeConversationId = { ctx.activeSessionId },
-                            messagesForSession = { ctx.sessionMessageState(it) },
-                            streaming = { ctx.streaming },
-                            streamingMessageId = { ctx.streamingAssistantId },
-                            streamingContent = { ctx.streamingAssistantContent },
-                            scrollerRef = { id, ref -> ctx.messageScrollerRefs[id] = ref },
-                            messageRef = { sessionId, messageId, ref ->
-                                ctx.messageRowRefs[ctx.messageRowKey(sessionId, messageId)] = ref
-                            },
-                            draft = { ctx.draft },
-                            skills = { ctx.skills },
-                            onPickSkill = { ctx.draft = "/$it " },
-                            keyboardHeight = { ctx.keyboardHeight },
-                            stopButtonVisible = { ctx.stopButtonVisible },
-                            inputRef = { ctx.inputView = it.view },
-                            onInputFocusChange = { ctx.inputFocused = it },
-                            onDraftChange = { ctx.draft = it },
-                            keyboardAnimation = { ctx.keyboardAnimation },
-                            onKeyboardHeightChange = { ctx.updateKeyboard(it) },
-                            onSend = { ctx.sendDraft() },
-                            onStop = { ctx.stopStream() },
-                            onDismissKeyboard = { ctx.dismissKeyboard() },
-                            onUserListScroll = { ctx.onConversationUserScroll(it) },
-                            modelLabel = { ctx.selectedModelLabel },
-                            voiceActive = { ctx.voiceActive },
-                            draftImages = { ctx.draftImages },
-                            attachmentsSending = { ctx.attachmentsSending },
-                            onOpenModels = { ctx.openModelPicker() },
-                            onToggleAttachments = { ctx.openAttachmentSheet() },
-                            onToggleVoice = { ctx.toggleVoice() },
-                            onPreviewDraftImage = { ctx.previewDraftImage(it) },
-                            onRemoveDraftImage = { ctx.removeDraftImage(it) },
-                            onRetryDraftImage = { ctx.retryDraftImage(it) },
-                            onPreviewAttachment = { ctx.previewAttachment(it) },
-                            isWebTimeline = { ctx.isRemoteHost },
-                            isDisclosureExpanded = { ctx.isWebDisclosureExpanded(it) },
-                            onToggleDisclosure = { ctx.toggleWebDisclosure(it) },
-                            isBodyDisclosureExpanded = { ctx.isWebBodyDisclosureExpanded(it) },
-                            onToggleBodyDisclosure = { ctx.toggleWebBodyDisclosure(it) },
-                            isJsonNodeExpanded = { messageId, nodeId ->
-                                ctx.isWebJsonNodeExpanded(messageId, nodeId)
-                            },
-                            onToggleJsonNode = { messageId, nodeId ->
-                                ctx.toggleWebJsonNode(messageId, nodeId)
-                            },
-                            onCopyToolContent = {
-                                ctx.copyPlainText(it)
-                            },
-                            onCopyMessage = { ctx.copyMessage(it) },
-                            onEnterSelectMode = { ctx.enterMessageSelect(it) },
-                            selectMode = { ctx.messageSelectMode },
-                            selectedRevision = { ctx.selectedMessageRevision },
-                            isMessageSelected = { ctx.selectedMessageIds.contains(it) },
-                            onToggleMessageSelected = { ctx.toggleMessageSelected(it) },
-                            selectedCount = { ctx.selectedMessageCount },
-                            onCopySelected = { ctx.copySelectedMessages() },
-                            onExportSelected = { ctx.exportSelectedMessages() },
-                            attachmentDataUrl = { ctx.attachmentDataUrl(it) },
-                            queueItems = { ctx.queueItems },
-                            jobItems = { ctx.jobItems },
-                            goal = { ctx.goalSnapshot },
-                            goalActionBusy = { ctx.goalActionBusy },
-                            goalActionError = { ctx.goalActionError },
-                            onPauseGoal = { ctx.pauseGoal() },
-                            onResumeGoal = { ctx.resumeGoal() },
-                            onEditGoal = { text, done -> ctx.editGoal(text, done) },
-                            onClearGoal = { ctx.clearGoal() },
-                            jobsPanelExpanded = { ctx.jobsPanelExpanded },
-                            jobsNow = { ctx.jobsNow },
-                            onToggleJobsPanel = { ctx.toggleJobsPanel() },
-                            queueExpanded = { ctx.queueDockExpanded },
-                            queueEditingId = { ctx.queueEditingId },
-                            queueActionBusy = { ctx.queueActionBusy },
-                            queueEditingText = { ctx.queueEditingText },
-                            sessionRunning = { ctx.sessionRunning },
-                            isBlankConversation = { ctx.isBlankSession() },
-                            conversationListEpoch = { ctx.conversationListEpochFor(it) },
-                            turnReconnecting = { isReconnectLabel(ctx.connectionLabel) },
-                            turnElapsedMs = { ctx.turnElapsedMs },
-                            onToggleQueue = { ctx.queueDockExpanded = !ctx.queueDockExpanded },
-                            onEditQueueItem = { ctx.editQueueItem(it) },
-                            onQueueEditingTextChange = { ctx.queueEditingText = it },
-                            onSaveQueueItem = { ctx.saveQueueItem(it) },
-                            onCancelQueueItemEdit = { ctx.cancelQueueItemEdit() },
-                            onRemoveQueueItem = { ctx.removeQueueItem(it) },
-                            onSteerQueueItem = { ctx.steerQueueItem(it) },
-                            pendingApproval = { ctx.pendingApproval },
-                            pendingQuestion = { ctx.pendingQuestion },
-                            interactionBusy = { ctx.interactionBusy },
-                            selectedQuestionOptions = { ctx.selectedQuestionOptions },
-                            questionCustom = { ctx.questionCustom },
-                            questionIndex = { ctx.questionIndex },
-                            questionError = { ctx.questionError },
-                            onAnswerApproval = { ctx.answerApproval(it) },
-                            onToggleQuestionOption = { ctx.toggleQuestionOption(it) },
-                            onQuestionCustomChange = { ctx.updateQuestionCustom(it) },
-                            onQuestionNavigate = { ctx.navigateQuestion(it) },
-                            onQuestionSkip = { ctx.skipQuestion() },
-                            onSubmitQuestion = { ctx.submitQuestion() },
-                            availableWidth = ctx.pagerData.pageViewWidth,
-                            consumeFreshMessage = { ctx.consumeFreshMessage(it) },
-                        )
+                        conversation(ctx.pagerData.pageViewWidth)
                         ctx.perfLog("body.conversation.end wide=false")
                     }
                     }
@@ -933,7 +953,6 @@ internal class DshHomePage : BasePager() {
                         activeId = { ctx.activeSessionId },
                         onSelect = { id ->
                             ctx.archivedSessionsVisible = false
-                            ctx.activeSessionArchived = true
                             ctx.closeSessionDrawer()
                             setTimeout(ctx.pagerId, 0) { ctx.selectSession(id) }
                         },
@@ -1444,13 +1463,13 @@ internal class DshHomePage : BasePager() {
 
     private fun refreshVisibleSessions() {
         val archivedIds = (repository as? DshRemoteRepository)?.store?.archivedSessionIds.orEmpty()
-        syncVisibleSessions(sessions, visibleSessions, archivedIds, sessionSort)
+        home.publishVisible(archivedIds)
     }
 
     private fun loadRepository(preferredSessionId: String? = null) {
         val hostRepository = repository ?: return
         hostRepository.loadSessions({ loaded ->
-            if (!connectionCoordinator.isActive(connectionMode)) return@loadSessions
+            if (!connection.isActive()) return@loadSessions
             val loadedIds = loaded.map { it.id }.toSet()
             sessions.map { it.id }
                 .filterNot { loadedIds.contains(it) }
@@ -1490,16 +1509,15 @@ internal class DshHomePage : BasePager() {
                     return@loadSessions
                 }
                 activeSessionId = nextId
-                activeSessionArchived = archivedIds.contains(nextId)
                 sessionRunning = loaded.firstOrNull { it.id == activeSessionId }?.running == true
                 refreshQueueDock()
                 refreshJobsPanel()
                 refreshPendingInteractions()
                 loadModels(activeSessionId)
-                loadHistory(activeSessionId, scrollToEndAfterLoad = false)
+                history.loadHistory(activeSessionId, scrollToEndAfterLoad = false)
                 syncImageLimits()
                 if (streaming || stopButtonVisible || sessionRunning) {
-                    resyncStreamingWithHost(activeSessionId, "session-list")
+                    history.resyncStreamingWithHost(activeSessionId, "session-list")
                 }
             } else {
                 preferBlankHomeOnNextLoad = false
@@ -1507,7 +1525,7 @@ internal class DshHomePage : BasePager() {
                 createSession()
             }
         }, { error ->
-            if (!connectionCoordinator.isActive(connectionMode)) return@loadSessions
+            if (!connection.isActive()) return@loadSessions
             connectionLabel = "内核连接失败"
             restoreCachedSessions()
             if (sessions.isEmpty()) {
@@ -1519,433 +1537,27 @@ internal class DshHomePage : BasePager() {
         })
     }
 
-    private fun startConnection() {
-        val generation = connectionCoordinator.begin(connectionMode)
-        when (connectionMode) {
-            DshConnectionMode.SSH -> {
-                startSshEngine(generation)
-                return
-            }
-            DshConnectionMode.RELAY -> {
-                startRelayEngine(generation)
-                return
-            }
-            DshConnectionMode.LOCAL -> {
-                connectionLabel = "本地模式已独立为 DSH Local App"
-                return
-            }
-        }
-    }
+    private fun startConnection() = connection.start()
 
-    private fun loadSshConfig() {
-        val profile = runCatching { localStore?.loadRemoteProfile() }.getOrNull()
-        sshHost = profile?.host.orEmpty()
-        sshUser = profile?.username.orEmpty()
-        sshPort = profile?.sshPort?.toString() ?: "22"
-        sshDshPort = profile?.remoteDshPort?.toString() ?: "3080"
-        sshKeyId = profile?.keyId.orEmpty()
-        sshFingerprint = profile?.hostFingerprint.orEmpty()
-        sshKeyLabel = if (sshKeyId.isEmpty()) "未导入私钥" else "已导入私钥"
-    }
+    private fun loadSshConfig() = connection.loadSshConfig()
 
+    private fun connectLocalEngine(apiKey: String) = connection.connectLocalEngine(apiKey)
 
-    private fun startRelayEngine(generation: Long) {
-        if (!pageData.supportsRelayBridge) {
-            connectionLabel = "扫码连接目前仅支持 Android、iOS 和 HarmonyOS"
-            return
-        }
-        connectionLabel = "正在连接扫码电脑"
-        acquireModule<DshRelayModule>(DshRelayModule.MODULE_NAME).connect { state ->
-            if (!isCurrent(generation, DshConnectionMode.RELAY)) return@connect
-            when (state.phase) {
-                DshRelayPhase.READY -> {
-                    if (state.localPort <= 0 || state.localToken.isEmpty()) return@connect
-                    val endpoint = "http://127.0.0.1:${state.localPort}"
-                    engineReady = true
-                    connectionLabel = state.message.ifEmpty { "扫码隧道已连接" }
-                    if (state.hostId.isNotEmpty()) remoteProfileId = state.hostId
-                    if (relayEngineEndpoint == endpoint && repository != null) return@connect
-                    relayEngineEndpoint = endpoint
-                    connectRemoteEngine(endpoint, state.localToken)
-                }
-                DshRelayPhase.ERROR -> {
-                    engineReady = false
-                    relayEngineEndpoint = ""
-                    connectionLabel = state.message.ifEmpty { "扫码连接失败" }
-                }
-                DshRelayPhase.RECONNECTING -> {
-                    relayEngineEndpoint = ""
-                    (repository as? DshRemoteRepository)?.stop()
-                    repository = null
-                    connectionLabel = "扫码连接重试中"
-                    syncTurnStatusTicker()
-                }
-                DshRelayPhase.STOPPED -> {
-                    engineReady = false
-                    relayEngineEndpoint = ""
-                    (repository as? DshRemoteRepository)?.stop()
-                    repository = null
-                    connectionLabel = "扫码连接已断开"
-                }
-                else -> {
-                    if (state.localPort <= 0) relayEngineEndpoint = ""
-                    connectionLabel = state.message.ifEmpty { "正在建立扫码隧道" }
-                }
-            }
-        }
-    }
+    private fun saveDeepSeekApiKey() = connection.saveDeepSeekApiKey()
 
-    private fun startSshEngine(generation: Long) {
-        if (sshHost.isBlank() || sshUser.isBlank() || sshKeyId.isBlank()) {
-            connectionLabel = "请配置 SSH 连接"
-            openConnectionSettings()
-            return
-        }
-        val module = acquireModule<DshEngineModule>(DshEngineModule.MODULE_NAME)
-        engineModule = module
-        connectionLabel = "正在连接 SSH"
-        module.startSsh(DshSshConfig(
-            host = sshHost,
-            port = sshPort.toIntOrNull() ?: 22,
-            username = sshUser,
-            remoteDshPort = sshDshPort.toIntOrNull() ?: 3080,
-            keyId = sshKeyId,
-            hostFingerprint = sshFingerprint,
-            keyPassphrase = sshKeyPassphrase,
-        )) { state ->
-            if (!isCurrent(generation, DshConnectionMode.SSH)) return@startSsh
-            when (state.phase) {
-                DshSshPhase.FINGERPRINT_REQUIRED -> {
-                    sshFingerprint = state.message
-                    sshSettingsError = "首次连接需要确认主机指纹：${state.message}"
-                    openConnectionSetup()
-                }
-                DshSshPhase.READY -> {
-                    engineReady = true
-                    connectionLabel = "正在检查远程 DSH"
-                    connectRemoteEngine("http://127.0.0.1:${state.localPort}")
-                }
-                DshSshPhase.RECONNECTING -> connectionLabel = "SSH 重连中"
-                DshSshPhase.ERROR -> {
-                    engineReady = false
-                    connectionLabel = "SSH 连接失败"
-                    sshSettingsError = state.message
-                    openConnectionSetup()
-                }
-                DshSshPhase.STOPPED -> {
-                    engineReady = false
-                    repository = null
-                    connectionLabel = "SSH 已断开"
-                }
-                else -> connectionLabel = state.message.ifEmpty { "正在连接 SSH" }
-            }
-        }
-    }
+    private fun openCredentialSettings() = connection.openCredentialSettings()
 
-    private fun connectRemoteEngine(baseUrl: String, token: String = "") {
-        (repository as? DshRemoteRepository)?.stop()
-        repository = DshRemoteRepository(
-            network = acquireModule<NetworkModule>(NetworkModule.MODULE_NAME),
-            webSocket = acquireModule<DshWebSocketModule>(DshWebSocketModule.MODULE_NAME),
-            connection = DshHostConnection(baseUrl, token),
-            pagerId = pagerId,
-            onState = { state -> handleHostRuntimeState(state) },
-            onQueueSnapshot = { sessionId ->
-                if (sessionId == activeSessionId) {
-                    refreshQueueDock()
-                    refreshPendingInteractions()
-                }
-            },
-            onJobsSnapshot = { sessionId ->
-                if (sessionId == activeSessionId) refreshJobsPanel()
-            },
-            onSessionStatus = { sessionId, running ->
-                if (sessionId == activeSessionId) {
-                    val wasRunning = sessionRunning
-                    sessionRunning = running
-                    if (wasRunning != running) {
-                        resyncStreamingWithHost(
-                            sessionId,
-                            if (running) "host-session-running" else "host-session-idle",
-                        )
-                    }
-                    syncTurnStatusTicker()
-                }
-            },
-            onProjection = { sessionId, key, value, seq ->
-                if (sessionId == activeSessionId) {
-                    when (key) {
-                        "title" -> {
-                            val title = value.trim().removeSurrounding("\"")
-                            if (title.isNotEmpty()) connectionLabel = title
-                        }
-                        "goal" -> goalSnapshot = parseGoalProjection(value)
-                        "imageLimits" -> {
-                            parseDshImageLimits(value)?.let {
-                                imageLimits = it
-                                imageLimitsKnown = true
-                            }
-                        }
-                    }
-                }
-            },
-            onSessionEvent = { sessionId, event ->
-                if (sessionId == activeSessionId) {
-                    when (event.type) {
-                        "tool/call" -> showRunningTool(event)
-                        "tool/result" -> settleRunningTool(event)
-                        "user/message" -> showContextInjection(event)
-                        "assistant/message" -> showAssistantBlocks(event)
-                    }
-                }
-            },
-            onRemoteEvent = { event ->
-                if (activeSessionId.isNotEmpty() && isRemoteCatalogInvalidationEvent(event)) {
-                    loadSkills(activeSessionId)
-                    loadModels(activeSessionId)
-                }
-            },
-            onArchivedSessionsChanged = { handleArchivedSessionsChanged() },
-            onPendingInteraction = { sessionId ->
-                DshStreamLog.question("ui.pending-frame session=$sessionId active=$activeSessionId")
-                if (sessionId == activeSessionId) {
-                    refreshPendingInteractions()
-                    loadWebTimeline(sessionId, scrollToEndAfterLoad = true)
-                }
-            },
-        )
-        loadRepository(preferredSessionId = activeSessionId)
-    }
+    private fun openConnectionSettings(preserveError: Boolean = false) = connection.openConnectionSettings(preserveError)
 
-    private fun handleHostRuntimeState(state: DshHostRuntimeState) {
-        if (!connectionCoordinator.isActive(connectionMode)) return
-        val wasReconnecting = isReconnectLabel(connectionLabel)
-        connectionLabel = when (state.phase) {
-            DshHostRuntimePhase.CONNECTING -> "正在打开远程事件流"
-            DshHostRuntimePhase.HOST_HANDSHAKE -> "正在检查远程 DSH"
-            DshHostRuntimePhase.SYNCING -> "正在同步远程会话"
-            DshHostRuntimePhase.READY -> "远程 DSH 已就绪"
-            DshHostRuntimePhase.RECONNECTING -> reconnectLabel()
-            DshHostRuntimePhase.ERROR -> "远程 DSH 连接失败"
-            DshHostRuntimePhase.STOPPED -> "远程 DSH 已停止"
-            DshHostRuntimePhase.DISCONNECTED -> "等待远程连接"
-        }
-        if (state.phase == DshHostRuntimePhase.READY && wasReconnecting) {
-            loadRepository(preferredSessionId = activeSessionId)
-        }
-        if (state.phase == DshHostRuntimePhase.READY) {
-            probeSessionLifecycle()
-        }
-        syncTurnStatusTicker()
-    }
+    private fun updateSshSettingsVisibility(visible: Boolean) = connection.updateSshSettingsVisibility(visible)
 
-    private fun connectLocalEngine(apiKey: String) {
-        connectionLabel = "本地内核启动中"
-        repository = DshHostRepository(
-            network = acquireModule<NetworkModule>(NetworkModule.MODULE_NAME),
-            sse = acquireModule<DshSseModule>(DshSseModule.MODULE_NAME),
-            connection = DshHostConnection(LOCAL_ENGINE_URL),
-            pagerId = pagerId,
-        )
-        syncLocalCredential(apiKey, 0)
-    }
+    private fun setConnectionMode(useSsh: Boolean) = connection.setConnectionMode(useSsh)
 
-    private fun syncLocalCredential(apiKey: String, attempt: Int) {
-        val hostRepository = repository ?: return
-        hostRepository.saveDeepSeekApiKey(apiKey, {
-            connectionLabel = "已连接"
-            loadRepository()
-        }, { error ->
-            if (attempt < ENGINE_CONNECT_RETRIES) {
-                connectionLabel = "本地内核启动中"
-                setTimeout(pagerId, ENGINE_RETRY_DELAY_MS) {
-                    syncLocalCredential(apiKey, attempt + 1)
-                }
-            } else {
-                connectionLabel = "内核启动失败"
-                messages.clear()
-                messages.add(DshMessage(
-                    "engine-start-error",
-                    DshMessageRole.ERROR,
-                    "本地 DeepSeek Harness 内核暂未就绪：$error",
-                ))
-            }
-        })
-    }
+    private fun pickSshKey() = connection.pickSshKey()
 
-    private fun saveDeepSeekApiKey() {
-        val key = apiKeyDraft.trim()
-        when {
-            key.isEmpty() -> {
-                credentialSetupError = "请输入 API Key 后继续。"
-                return
-            }
-            key.any { it.code !in 0x21..0x7E } -> {
-                credentialSetupError = "API Key 格式错误，请检查后重试。"
-                return
-            }
-        }
-        credentialSetupBusy = true
-        credentialSetupError = ""
-        if (sshMode) {
-            val hostRepository = repository
-            if (hostRepository == null) {
-                credentialSetupBusy = false
-                credentialSetupError = "远程 DSH 尚未就绪"
-                return
-            }
-            hostRepository.saveDeepSeekApiKey(key, {
-                setTimeout(pagerId, 0) {
-                    apiKeyDraft = ""
-                    apiKeyInputView?.setText("")
-                    credentialSetupBusy = false
-                    updateCredentialSetupVisibility(false)
-                    dismissKeyboard()
-                    connectionLabel = "远程 DSH 已更新"
-                    loadRepository()
-                }
-            }, { error ->
-                setTimeout(pagerId, 0) {
-                    credentialSetupBusy = false
-                    credentialSetupError = "无法修改电脑端 DSH：$error"
-                }
-            })
-            return
-        }
-        val saved = runCatching { localStore?.saveApiKey(key) }
-        if (saved.isFailure || localStore == null) {
-            credentialSetupBusy = false
-            credentialSetupError = saved.exceptionOrNull()?.message ?: "本地数据库不可用"
-            return
-        }
-        apiKeyDraft = ""
-        apiKeyInputView?.setText("")
-        credentialSetupBusy = false
-        credentialSetupError = ""
-        updateCredentialSetupVisibility(false)
-        dismissKeyboard()
-        pendingApiKey = key
-        if (engineReady) {
-            connectLocalEngine(key)
-        } else {
-            connectionLabel = "等待本地内核启动"
-        }
-    }
+    private fun trustSshFingerprint() = connection.trustSshFingerprint()
 
-    private fun openCredentialSettings() {
-        dismissKeyboard()
-        //closeSessionDrawer()
-        credentialSetupTitle = if (sshMode) "修改电脑端 DSH 的 API Key" else "设置 DeepSeek API Key"
-        credentialSetupError = ""
-        apiKeyDraft = pendingApiKey
-        updateCredentialSetupVisibility(true)
-    }
-
-    private fun openConnectionSettings(preserveError: Boolean = false) {
-        dismissKeyboard()
-        closeSessionDrawer()
-        appSettingsHubVisible = false
-        if (!preserveError) sshSettingsError = ""
-        updateSshSettingsVisibility(true)
-    }
-
-    private fun updateSshSettingsVisibility(visible: Boolean) {
-        sshSettingsVisible = visible
-        if (pageData.isAndroid || pageData.isIOS) {
-            bridgeModule.setSystemBarsDimmed(visible)
-        }
-    }
-
-    private fun setConnectionMode(useSsh: Boolean) {
-        connectionMode = if (useSsh) DshConnectionMode.SSH else DshConnectionMode.RELAY
-        sshSettingsError = ""
-    }
-
-    private fun pickSshKey() {
-        bridgeModule.pickSshKey { uri ->
-            if (uri.isEmpty()) return@pickSshKey
-            sshSettingsBusy = true
-            bridgeModule.importSshKey(uri) { keyId ->
-                setTimeout(pagerId, 0) {
-                    sshSettingsBusy = false
-                    if (keyId.isEmpty()) {
-                        sshSettingsError = "无法导入 SSH 私钥"
-                    } else {
-                        sshKeyId = keyId
-                        sshKeyLabel = "已导入私钥"
-                        sshSettingsError = ""
-                    }
-                }
-            }
-        }
-    }
-
-    private fun trustSshFingerprint() {
-        if (sshFingerprint.isBlank()) return
-        acquireModule<DshEngineModule>(DshEngineModule.MODULE_NAME).trustSshFingerprint(sshFingerprint)
-        runCatching {
-            localStore?.saveRemoteProfile(DshRemoteProfile(
-                host = sshHost.trim(),
-                sshPort = sshPort.toIntOrNull() ?: 22,
-                username = sshUser.trim(),
-                remoteDshPort = sshDshPort.toIntOrNull() ?: 3080,
-                keyId = sshKeyId,
-                hostFingerprint = sshFingerprint,
-            ))
-        }
-        sshSettingsError = "正在使用已确认的主机指纹连接"
-    }
-
-    private fun saveConnectionSettings() {
-        if (sshMode) {
-            val port = sshPort.toIntOrNull()
-            val dshPort = sshDshPort.toIntOrNull()
-            when {
-                sshHost.isBlank() -> sshSettingsError = "请输入 SSH 主机地址"
-                sshUser.isBlank() -> sshSettingsError = "请输入 SSH 用户名"
-                port == null || port !in 1..65535 -> sshSettingsError = "SSH 端口无效"
-                dshPort == null || dshPort !in 1..65535 -> sshSettingsError = "远程 DSH 端口无效"
-                sshKeyId.isBlank() -> sshSettingsError = "请先导入 SSH 私钥"
-                else -> {
-                    runCatching { localStore?.saveRemoteProfile(DshRemoteProfile(
-                        host = sshHost.trim(),
-                        sshPort = port,
-                        username = sshUser.trim(),
-                        remoteDshPort = dshPort,
-                        keyId = sshKeyId,
-                        hostFingerprint = sshFingerprint,
-                    )) }
-                    runCatching { localStore?.saveLastConnectionMode(DshConnectionMode.SSH) }
-                    updateSshSettingsVisibility(false)
-                    stopCurrentEngine()
-                    openConnectionSetup()
-                }
-            }
-        } else {
-            runCatching { localStore?.saveLastConnectionMode(DshConnectionMode.RELAY) }
-            updateSshSettingsVisibility(false)
-            stopCurrentEngine()
-            openConnectionSetup()
-        }
-    }
-
-    private fun stopCurrentEngine() {
-        val mode = connectionCoordinator.activeModeOr(connectionMode)
-        connectionCoordinator.stop()
-        (repository as? DshRemoteRepository)?.stop()
-        repository = null
-        goalSnapshot = null
-        goalActionBusy = false
-        goalActionError = ""
-        streamHandle?.cancel()
-        streamHandle = null
-        when (mode) {
-            DshConnectionMode.RELAY -> acquireModule<DshRelayModule>(DshRelayModule.MODULE_NAME).disconnect()
-            DshConnectionMode.SSH -> engineModule?.stopSsh()
-            DshConnectionMode.LOCAL -> engineModule?.stop()
-        }
-        engineReady = false
-    }
+    private fun saveConnectionSettings() = connection.saveConnectionSettings()
 
     private fun goalMutation(
         action: (DshRemoteRepository, DshGoalSnapshot, (DshRpcError?) -> Unit) -> Unit,
@@ -1979,27 +1591,9 @@ internal class DshHomePage : BasePager() {
         }
     })
 
-    private fun isCurrent(generation: Long, mode: DshConnectionMode): Boolean =
-        connectionCoordinator.accepts(generation, mode)
+    private fun closeCredentialSettings() = connection.closeCredentialSettings()
 
-    private fun openConnectionSetup() {
-        acquireModule<RouterModule>(RouterModule.MODULE_NAME).openPage(
-            "connection_setup",
-            JSONObject().apply { put("pageName", "connection_setup") },
-        )
-    }
-
-    private fun closeCredentialSettings() {
-        dismissKeyboard()
-        updateCredentialSetupVisibility(false)
-    }
-
-    private fun updateCredentialSetupVisibility(visible: Boolean) {
-        credentialSetupVisible = visible
-        if (pageData.isAndroid || pageData.isIOS) {
-            bridgeModule.setSystemBarsDimmed(visible)
-        }
-    }
+    private fun updateCredentialSetupVisibility(visible: Boolean) = connection.updateCredentialSetupVisibility(visible)
 
     private fun createSession() {
         val traceId = ++perfTraceSequence
@@ -2060,7 +1654,6 @@ internal class DshHomePage : BasePager() {
             }
             runCatching { localStore?.replaceSessions(activeConnectionId, sessions.toList()) }
             activeSessionId = sessionId
-            activeSessionArchived = false
             messages = ObservableList()
             sessionMessageStates[sessionId] = messages
             sessionMessageReady.add(sessionId)
@@ -2082,67 +1675,16 @@ internal class DshHomePage : BasePager() {
         })
     }
 
-    private fun loadHistory(
-        sessionId: String,
-        scrollToEndAfterLoad: Boolean = true,
-    ) {
-        ++historyRequestGeneration
-
-        // Show the selected session immediately. The Host history request is
-        // remote and can take a moment, so keeping the previous list here
-        // makes a session switch look stuck.
-        messages = sessionMessageState(
-            sessionId,
-            scrollToEndAfterLoad = scrollToEndAfterLoad,
-        )
-        ensureConversationPanel(sessionId)
-        fetchHostHistory(sessionId, scrollToEndAfterLoad)
-    }
-
-    private fun fetchHostHistory(
-        sessionId: String,
-        scrollToEndAfterLoad: Boolean = true,
-    ) {
-        if (isRemoteHost) {
-            loadSkills(sessionId)
-            loadWebTimeline(sessionId, scrollToEndAfterLoad)
-            return
-        }
-
-        val requestGeneration = historyRequestGeneration
-        val hostRepository = repository ?: return
-        hostRepository.loadHistory(sessionId, { loaded ->
-            if (requestGeneration != historyRequestGeneration || activeSessionId != sessionId) return@loadHistory
-            sessionMessageReady.add(sessionId)
-            sessionCacheStates[sessionId] = DshSessionCacheState.SYNCED
-            replaceMessagesIfChanged(loaded)
-            runCatching { localStore?.replaceMessages(activeConnectionId, sessionId, loaded) }
-            completePendingSessionSelection(sessionId)
-            realizeSessionAfterData(sessionId, scrollToEndAfterLoad)
-        }, { error ->
-            if (requestGeneration != historyRequestGeneration || activeSessionId != sessionId) return@loadHistory
-            if (messages.isNotEmpty()) {
-                if (isRemoteHost) {
-                    sessionCacheStates[sessionId] = DshSessionCacheState.SYNC_FAILED
-                    connectionLabel = "远程历史同步失败 · 已显示缓存"
-                } else {
-                    connectionLabel = "内核连接失败 · 已显示缓存"
-                }
-            } else {
-                messages.add(DshMessage("history-error", DshMessageRole.ERROR, error))
-            }
-        })
-    }
-
     private fun loadWebTimeline(
         sessionId: String,
         scrollToEndAfterLoad: Boolean = true,
         forceReplace: Boolean = false,
         afterApply: () -> Unit = {},
     ) {
+        val token = session.generationToken
         val hostRepository = repository as? DshRemoteRepository ?: return
         hostRepository.loadWebTimeline(sessionId, { items ->
-            if (!isRemoteHost || activeSessionId != sessionId) return@loadWebTimeline
+            if (!session.accepts(token) || !isRemoteHost || activeSessionId != sessionId) return@loadWebTimeline
             val projected = items.map { item ->
                 when (item.kind) {
                     DshWebTimelineItem.Kind.USER -> DshMessage(
@@ -2211,6 +1753,7 @@ internal class DshHomePage : BasePager() {
             realizeSessionAfterData(sessionId, scrollToEndAfterLoad)
             afterApply()
         }, { error ->
+            if (!session.accepts(token)) return@loadWebTimeline
             DshStreamLog.i("ui.history-fail session=$sessionId error='${DshStreamLog.preview(error)}'")
             if (forceReplace && !sessionRunning && (streaming || stopButtonVisible)) {
                 finishStreamingFromHistory(sessionId)
@@ -2219,53 +1762,19 @@ internal class DshHomePage : BasePager() {
         })
     }
 
-    private fun resyncStreamingWithHost(sessionId: String, reason: String) {
-        if (!isRemoteHost || sessionId != activeSessionId) return
-        DshStreamLog.i(
-            "ui.resync.begin reason=$reason session=$sessionId running=$sessionRunning streaming=$streaming stop=$stopButtonVisible",
-        )
-        // A local prompt is already painting this turn. Reloading the web
-        // timeline remounts every markdown bubble and delays the first token.
-        if (reason == "host-session-running" && isLocalPromptInFlight()) {
-            DshStreamLog.i(
-                "ui.resync.skip-local-stream reason=$reason session=$sessionId root=$streamingAssistantRootId",
-            )
-            return
-        }
-        if (sessionRunning) {
-            loadWebTimeline(sessionId, scrollToEndAfterLoad = true, forceReplace = true) {
-                resumeStreamingFromHistory(sessionId, reason)
-            }
-        } else {
-            val forceReplace = streaming || stopButtonVisible
-            loadWebTimeline(sessionId, scrollToEndAfterLoad = true, forceReplace = forceReplace) {
-                finishStreamingFromHistory(sessionId)
-                connectionLabel = "已连接"
-                DshStreamLog.i("ui.resync.settled reason=$reason session=$sessionId messages=${messages.size}")
-            }
-        }
-    }
-
-    private fun isLocalPromptInFlight(): Boolean =
-        streaming && streamingAssistantRootId.isNotEmpty()
-
-    private fun rebindStreamingToHistoryTail(): Boolean {
-        val live = dshHistoryTailToResume(messages.toList(), streamingTurnAnchorAssistantId)
-            ?: return false
-        streamingAssistantId = live.id
-        streamingAssistantRootId = live.id
-        streamingAssistantSegment = 0
-        streamingAssistantContent = live.content
-        return true
-    }
-
     private fun finishStreamingFromHistory(sessionId: String) {
         if (!(streaming || stopButtonVisible)) return
         flushAssistantDelta()
-        if (rebindStreamingToHistoryTail()) {
-            settleStreamingMessage(DshMessageRole.ASSISTANT, streamingAssistantContent)
-        } else {
-            releaseStreamingUi()
+        when (val plan = ConversationCoordinator.planHistoryFinish(
+            messages.toList(),
+            streamingTurnAnchorAssistantId,
+            streamCursor(),
+        )) {
+            HistoryFinish.Release -> releaseStreamingUi()
+            is HistoryFinish.Rebound -> {
+                applyCursor(plan.cursor)
+                settleStreamingMessage(DshMessageRole.ASSISTANT, streamingAssistantContent)
+            }
         }
         persistMessages(sessionId)
         (repository as? DshRemoteRepository)?.detachLiveStreams(sessionId)
@@ -2274,37 +1783,30 @@ internal class DshHomePage : BasePager() {
 
     private fun resumeStreamingFromHistory(sessionId: String, reason: String) {
         if (sessionId != activeSessionId) return
-        val rebound = rebindStreamingToHistoryTail()
-        if (rebound) {
-            streaming = true
-            stopButtonVisible = true
-            connectionLabel = "正在生成"
-            val index = messages.indexOfFirst { it.id == streamingAssistantId }
-            if (index >= 0) {
-                messages[index] = messages[index].copy(streaming = true)
+        val plan = ConversationCoordinator.planHistoryResume(
+            messages.toList(),
+            streamingTurnAnchorAssistantId,
+            streamCursor(),
+        )
+        val rebound = plan is HistoryResume.Rebound
+        when (plan) {
+            is HistoryResume.Rebound -> {
+                applyCursor(plan.cursor)
+                session.apply(ConversationAction.UpsertMessage(plan.message))
             }
-        } else {
-            if (streamingAssistantRootId.isEmpty()) {
-                streamingAssistantRootId = "assistant-adopted-${messages.size}"
-            }
-            val liveStillPresent = streamingAssistantId.isNotEmpty() &&
-                messages.any { it.id == streamingAssistantId }
-            if (!liveStillPresent) {
-                val kept = streamingAssistantContent + pendingAssistantDelta.toString()
-                pendingAssistantDelta.setLength(0)
-                streamingAssistantId = ""
-                streamingAssistantSegment = 0
-                streamingAssistantContent = ""
-                if (kept.isNotEmpty()) {
+            is HistoryResume.Continue -> {
+                applyCursor(plan.cursor)
+                val replay = plan.replay
+                if (replay != null) {
                     ensureStreamingAssistantSegment()
-                    streamingAssistantContent = kept
-                    updateStreamingMessage(kept, streaming = true)
+                    applyCursor(streamCursor().copy(content = replay))
+                    updateStreamingMessage(replay, streaming = true)
                 }
             }
-            streaming = true
-            stopButtonVisible = true
-            connectionLabel = "正在生成"
         }
+        streaming = true
+        stopButtonVisible = true
+        connectionLabel = "正在生成"
         attachAdoptedLiveStream(sessionId)
         syncTurnStatusTicker()
         DshStreamLog.i(
@@ -2314,10 +1816,11 @@ internal class DshHomePage : BasePager() {
 
     private fun attachAdoptedLiveStream(sessionId: String) {
         val hostRepository = repository as? DshRemoteRepository ?: return
+        val token = session.generationToken
         streamHandle = hostRepository.adoptLiveStream(
             sessionId = sessionId,
             onDelta = { delta, isReasoning ->
-                if (!connectionCoordinator.isActive(connectionMode) || activeSessionId != sessionId) return@adoptLiveStream
+                if (!session.accepts(token) || !connection.isActive() || activeSessionId != sessionId) return@adoptLiveStream
                 if (isReasoning) {
                     val reasoningId = streamingReasoningId.ifEmpty { "$streamingAssistantRootId-reasoning" }
                     if (streamingReasoningId.isEmpty()) streamingReasoningId = reasoningId
@@ -2330,7 +1833,7 @@ internal class DshHomePage : BasePager() {
                 }
             },
             onComplete = { result ->
-                if (!connectionCoordinator.isActive(connectionMode)) return@adoptLiveStream
+                if (!session.accepts(token) || !connection.isActive()) return@adoptLiveStream
                 flushAssistantDelta()
                 if (streamingAssistantId.isEmpty() && result.isNotEmpty()) {
                     ensureStreamingAssistantSegment()
@@ -2345,7 +1848,7 @@ internal class DshHomePage : BasePager() {
                 streamHandle = null
             },
             onError = { error ->
-                if (!connectionCoordinator.isActive(connectionMode)) return@adoptLiveStream
+                if (!session.accepts(token) || !connection.isActive()) return@adoptLiveStream
                 if (dshIsTransportInterrupt("", error)) {
                     DshStreamLog.i("ui.adopt-interrupt session=$sessionId message='${DshStreamLog.preview(error)}'")
                     return@adoptLiveStream
@@ -2556,19 +2059,16 @@ internal class DshHomePage : BasePager() {
 
     private fun refreshWorkspaceGroups() {
         if (!isRemoteHost) {
-            workspaceGroups.clear()
-            archivedSessions.clear()
-            activeSessionArchived = false
+            home.replaceWorkspaceGroups(emptyList())
+            home.replaceArchived(emptyList())
             return
         }
         val repository = repository as? DshRemoteRepository ?: return
         val groups = repository.workspaceGroups().map { group ->
             group.copy(sessions = dshSortedSessions(group.sessions, sessionSort))
         }
-        workspaceGroups.clear()
-        workspaceGroups.addAll(groups)
-        archivedSessions.clear()
-        archivedSessions.addAll(dshSortedSessions(repository.archivedSessions(), sessionSort))
+        home.replaceWorkspaceGroups(groups)
+        home.replaceArchived(dshSortedSessions(repository.archivedSessions(), sessionSort))
     }
 
     private fun handleArchivedSessionsChanged() {
@@ -2929,7 +2429,6 @@ internal class DshHomePage : BasePager() {
                     archivedIds = repository.store.archivedSessionIds,
                     excludedId = sessionId,
                 )
-                if (wasActive) activeSessionArchived = true
                 closeSessionActionModals()
                 refreshWorkspaceGroups()
                 refreshVisibleSessions()
@@ -2971,12 +2470,9 @@ internal class DshHomePage : BasePager() {
                 }
                 sessionUndoId = ""
                 sessionUndoTitle = ""
-                activeSessionArchived = activeSessionId == sessionId &&
-                    repository.store.archivedSessionIds.contains(sessionId)
                 closeSessionActionModals()
                 refreshWorkspaceGroups()
                 refreshVisibleSessions()
-                if (activeSessionId == sessionId) activeSessionArchived = false
             }
         }
     }
@@ -3421,7 +2917,7 @@ internal class DshHomePage : BasePager() {
             pendingEnterSelectSessionId = ""
         }
         if (messageSelectMode) exitMessageSelect()
-        if (id == activeSessionId) {
+        if (ConversationCoordinator.planSessionSwitch(activeSessionId, id) is SessionSwitch.Same) {
             perfLog("switch.$traceId.same-session", startedAt)
             consumePendingEnterSelect(id)
             return
@@ -3443,7 +2939,7 @@ internal class DshHomePage : BasePager() {
     }
 
     private fun selectMountedSession(id: String, traceId: Int = 0, startedAt: TimeMark? = null) {
-        if (id == activeSessionId) return
+        if (ConversationCoordinator.planSessionSwitch(activeSessionId, id) is SessionSwitch.Same) return
         perfLog("switch.$traceId.mounted.begin", startedAt)
         refreshSessionRenderTree(id)
         cancelStreamingForSessionSwitch()
@@ -3452,8 +2948,6 @@ internal class DshHomePage : BasePager() {
         ensureConversationPanel(id)
         messages = nextMessages
         activeSessionId = id
-        activeSessionArchived =
-            (repository as? DshRemoteRepository)?.store?.archivedSessionIds?.contains(id) == true
         perfLog("switch.$traceId.active-state-swapped", startedAt)
         scrollMessagesToEnd()
         addTaskWhenPagerUpdateLayoutFinish {
@@ -3464,10 +2958,12 @@ internal class DshHomePage : BasePager() {
         // Invalidate any in-flight request for the previous session before
         // starting the new one, so an old response cannot repaint this view.
         historyRequestGeneration++
+        val token = session.generationToken
         loadMessagesFromDisk(id)
-        fetchHostHistory(id)
+        history.fetchHostHistory(id)
         setTimeout(pagerId, 0) {
-            if (activeSessionId == id) loadModels(id)
+            if (!session.accepts(token) || activeSessionId != id) return@setTimeout
+            loadModels(id)
         }
         draft = ""
         inputView?.setText("")
@@ -3817,90 +3313,94 @@ internal class DshHomePage : BasePager() {
     private fun sendDraft(retryLocalId: String? = null) {
         dismissKeyboard()
         attachmentSheetVisible = false
-        val prompt = draft.trim()
-        val sending = draftImagesToSend(retryLocalId)
-        if ((prompt.isEmpty() && sending.isEmpty()) || streaming || attachmentsSending) return
+        val token = session.generationToken
         val hostRepository = repository as? DshRemoteRepository
-        if (hostRepository == null) {
-            connectionLabel = "本地内核尚未连接"
-            messages.add(DshMessage(
-                "send-engine-error-${messages.size}",
-                DshMessageRole.ERROR,
-                "本地 Harness 尚未连接，请稍候再试。",
-            ))
-            return
+        val channel = when {
+            hostRepository == null -> SendChannel.Missing
+            !hostRepository.isProductReady() -> SendChannel.Syncing
+            else -> SendChannel.Ready
         }
-        if (!hostRepository.isProductReady()) {
-            connectionLabel = syncBusyLabel()
-            return
+        when (val plan = ConversationCoordinator.planSend(SendRequest(
+            prompt = draft,
+            draftImages = draftImages.toList(),
+            retryLocalId = retryLocalId,
+            streaming = streaming,
+            attachmentsSending = attachmentsSending,
+            channel = channel,
+            syncingLabel = syncBusyLabel(),
+            sessionsEmpty = sessions.isEmpty(),
+            activeSessionId = activeSessionId,
+            messageCount = messages.size,
+            limits = effectiveImageLimits(),
+            limitsKnown = imageLimitsKnown,
+        ))) {
+            SendPlan.Ignored -> return
+            is SendPlan.NotReady -> {
+                connectionLabel = plan.label
+                plan.message?.let { session.apply(ConversationAction.AppendMessage(it)) }
+            }
+            is SendPlan.ImagesRejected -> {
+                session.apply(ConversationAction.MarkDraftImagesFailed(plan.localIds, plan.code, plan.message))
+                if (plan.message.isNotEmpty()) bridgeModule.toast(plan.message)
+            }
+            SendPlan.NeedSession -> {
+                connectionLabel = "正在创建会话"
+                hostRepository?.createSession(null, { sessionId ->
+                    if (!session.accepts(token)) return@createSession
+                    session.apply(ConversationAction.AddBlankSession(sessionId))
+                    refreshVisibleSessions()
+                    runCatching { localStore?.replaceSessions(activeConnectionId, sessions.toList()) }
+                    loadModels(sessionId)
+                    sendDraft(retryLocalId)
+                }, { error ->
+                    if (!session.accepts(token)) return@createSession
+                    connectionLabel = "会话创建失败"
+                    session.apply(ConversationAction.AppendMessage(
+                        ConversationCoordinator.sessionCreateFailed(messages.size, error),
+                    ))
+                })
+            }
+            is SendPlan.Ready -> {
+                val remote = hostRepository ?: return
+                beginAcceptedSend(remote, plan, token)
+            }
         }
-        val admitted = dshAdmitDraftImages(emptyList(), sending, effectiveImageLimits(), imageLimitsKnown)
-        if (sending.isNotEmpty() && admitted.accepted.isEmpty()) {
-            markDraftImagesFailed(sending, admitted.rejectedCode, admitted.rejectedMessage)
-            if (admitted.rejectedMessage.isNotEmpty()) bridgeModule.toast(admitted.rejectedMessage)
-            return
-        }
-        val images = admitted.accepted
-        if (sessions.isEmpty()) {
-            connectionLabel = "正在创建会话"
-            hostRepository.createSession(null, { sessionId ->
-                sessions.add(DshSession(sessionId, "新会话", "Host", "", blank = true))
-                refreshVisibleSessions()
-                runCatching { localStore?.replaceSessions(activeConnectionId, sessions.toList()) }
-                activeSessionId = sessionId
-                activeSessionArchived = false
-                loadModels(sessionId)
-                sendDraft(retryLocalId)
-            }, { error ->
-                connectionLabel = "会话创建失败"
-                messages.add(DshMessage(
-                    "send-session-error-${messages.size}",
-                    DshMessageRole.ERROR,
-                    "无法创建会话：$error",
-                ))
-            })
-            return
-        }
-        val sessionId = activeSessionId
+    }
+
+    private fun beginAcceptedSend(
+        hostRepository: DshRemoteRepository,
+        plan: SendPlan.Ready,
+        token: Long,
+    ) {
+        val images = plan.images
+        val sessionId = plan.sessionId
+        val prompt = plan.prompt
+        val assistantId = plan.assistantId
+        val reasoningId = plan.reasoningId
+        val user = plan.user
         touchSessionActivity(sessionId)
         pendingSendImages = images
-        val remainingDrafts = draftImages.filter { image -> images.none { it.localId == image.localId } }
-        draftImages.clear()
-        remainingDrafts.forEach { draftImages.add(it) }
         images.forEach { cachedAttachmentDataUrls[it.localId] = it.previewDataUrl() }
         if (images.isNotEmpty()) attachmentRevision += 1
-        val user = DshMessage(
-            "user-${messages.size}",
-            DshMessageRole.USER,
-            prompt,
-            attachments = images.map { it.toRef() },
-        )
-        val assistantId = "assistant-${messages.size}"
-        val reasoningId = "$assistantId-reasoning"
         val wasEmpty = messages.isEmpty()
         freshMessageIds.add(user.id)
-        messages.add(user)
-        // DSH ChatView keeps the assistant node out of the flow until the
-        // first token. The turn-status row ("Deep diving...") occupies that
-        // gap so LazyLoop never has to realize an empty markdown bubble.
+        session.apply(ConversationAction.BeginOutgoingTurn(
+            user = user,
+            acceptedLocalIds = images.map { it.localId }.toSet(),
+            attachmentsSending = images.isNotEmpty(),
+        ))
         sessionMessageStates[sessionId] = messages
         if (wasEmpty) remountConversationList(sessionId)
         pinFollowListTail()
         scrollMessagesToMessage(user.id)
         streamingTurnAnchorAssistantId = messages.lastOrNull(::dshIsLiveAssistantText)?.id.orEmpty()
-        streamingAssistantId = ""
         streamingAssistantRootId = assistantId
         streamingAssistantSegment = 0
         streamingReasoningId = reasoningId
         streamingReasoningContent = ""
-        streamingAssistantContent = ""
         pendingAssistantDelta.setLength(0)
         assistantFlushScheduled = false
-        draft = ""
         inputView?.setText("")
-        streaming = true
-        attachmentsSending = images.isNotEmpty()
-        stopButtonVisible = true
         connectionLabel = if (images.isNotEmpty()) "正在发送图片" else "正在生成"
         syncTurnStatusTicker()
         var promptAccepted = false
@@ -3910,6 +3410,7 @@ internal class DshHomePage : BasePager() {
             prompt = prompt,
             images = images.map { it.toPromptPart() },
             onDelta = { delta, isReasoning ->
+                if (!session.accepts(token)) return@streamReply
                 promptAccepted = true
                 attachmentsSending = false
                 pendingSendImages = emptyList()
@@ -3918,7 +3419,7 @@ internal class DshHomePage : BasePager() {
                 else queueAssistantDelta(assistantId, delta)
             },
             onComplete = { result ->
-                if (!connectionCoordinator.isActive(connectionMode)) return@streamReply
+                if (!session.accepts(token) || !connection.isActive()) return@streamReply
                 promptAccepted = true
                 attachmentsSending = false
                 pendingSendImages = emptyList()
@@ -3926,10 +3427,6 @@ internal class DshHomePage : BasePager() {
                 if (streamingAssistantId.isEmpty() && result.isNotEmpty()) {
                     ensureStreamingAssistantSegment()
                 }
-                // A turn may contain several assistant text blocks separated by
-                // tool calls. The current segment already contains the final
-                // block; using the turn-wide accumulator here would move all
-                // earlier text back into this last row.
                 val completedContent = streamingAssistantContent.ifEmpty { result }
                 DshStreamLog.i(
                     "ui.complete session=$sessionId resultChars=${result.length} liveChars=${streamingAssistantContent.length} preview='${DshStreamLog.preview(completedContent)}'",
@@ -3940,15 +3437,13 @@ internal class DshHomePage : BasePager() {
                 streamHandle = null
             },
             onError = { error ->
-                if (!connectionCoordinator.isActive(connectionMode)) return@streamReply
+                if (!session.accepts(token) || !connection.isActive()) return@streamReply
                 if (dshIsTransportInterrupt("", error)) {
                     DshStreamLog.i("ui.prompt-interrupt session=$sessionId message='${DshStreamLog.preview(error)}'")
                     return@streamReply
                 }
                 attachmentsSending = false
-                if (!promptAccepted) {
-                    restoreFailedSend(user.id, prompt, pendingSendImages, error)
-                }
+                if (!promptAccepted) restoreFailedSend(user.id, prompt, pendingSendImages, error)
                 pendingSendImages = emptyList()
                 flushAssistantDelta()
                 ensureStreamingAssistantSegment()
@@ -3961,55 +3456,14 @@ internal class DshHomePage : BasePager() {
         )
     }
 
-    private fun draftImagesToSend(retryLocalId: String?): List<DshDraftImage> {
-        if (retryLocalId != null) {
-            return draftImages.filter { it.localId == retryLocalId }
-        }
-        val ready = draftImages.filter { it.status != DshDraftImageStatus.FAILED }
-        return ready.ifEmpty { draftImages.toList() }
-    }
-
-    private fun markDraftImagesFailed(
-        images: List<DshDraftImage>,
-        code: String,
-        message: String,
-    ) {
-        val ids = images.map { it.localId }.toSet()
-        val label = message.ifEmpty { dshAttachmentErrorLabel(code) }
-        for (index in draftImages.indices) {
-            val image = draftImages[index]
-            if (image.localId in ids) {
-                draftImages[index] = image.copy(
-                    status = DshDraftImageStatus.FAILED,
-                    errorCode = code,
-                    errorMessage = label,
-                )
-            }
-        }
-    }
-
     private fun restoreFailedSend(
         userMessageId: String,
         prompt: String,
         images: List<DshDraftImage>,
         error: String,
     ) {
-        val index = messages.indexOfFirst { it.id == userMessageId }
-        if (index >= 0) messages.removeAt(index)
-        if (prompt.isNotEmpty()) {
-            draft = prompt
-            inputView?.setText(prompt)
-        }
-        images.forEach { image ->
-            if (draftImages.none { it.localId == image.localId }) {
-                draftImages.add(
-                    image.copy(
-                        status = DshDraftImageStatus.FAILED,
-                        errorMessage = error,
-                    ),
-                )
-            }
-        }
+        session.apply(ConversationAction.RestoreUnacceptedSend(userMessageId, prompt, images, error))
+        if (prompt.isNotEmpty()) inputView?.setText(prompt)
         if (error.isNotEmpty()) bridgeModule.toast(error)
     }
 
@@ -4157,14 +3611,41 @@ internal class DshHomePage : BasePager() {
         attachmentsSending = false
     }
 
+    private fun streamCursor() = StreamCursor(
+        streaming = streaming,
+        rootId = streamingAssistantRootId,
+        segment = streamingAssistantSegment,
+        assistantId = streamingAssistantId,
+        content = streamingAssistantContent,
+        pending = pendingAssistantDelta.toString(),
+        reasoningId = streamingReasoningId,
+        reasoningContent = streamingReasoningContent,
+        flushScheduled = assistantFlushScheduled,
+    )
+
+    private fun applyCursor(cursor: StreamCursor) {
+        streaming = cursor.streaming
+        streamingAssistantRootId = cursor.rootId
+        streamingAssistantSegment = cursor.segment
+        streamingAssistantId = cursor.assistantId
+        streamingAssistantContent = cursor.content
+        pendingAssistantDelta.setLength(0)
+        pendingAssistantDelta.append(cursor.pending)
+        streamingReasoningId = cursor.reasoningId
+        streamingReasoningContent = cursor.reasoningContent
+        assistantFlushScheduled = cursor.flushScheduled
+    }
+
     private fun stopStream() {
         if (!stopButtonVisible) return
         dismissKeyboard()
         streamHandle?.cancel()
         streamHandle = null
         flushAssistantDelta()
-        ensureStreamingAssistantSegment()
-        val stoppedContent = streamingAssistantContent + "\n\n*已停止*"
+        val ensured = ConversationCoordinator.ensureSegment(streamCursor())
+        applyCursor(ensured.cursor)
+        if (ensured.insertRow) insertLiveAssistantRow()
+        val stoppedContent = ConversationCoordinator.stoppedContent(streamingAssistantContent)
         sessionRenderLog("stream.stop.begin session=$activeSessionId messages=${messages.size} chars=${stoppedContent.length}")
         settleStreamingMessage(DshMessageRole.ASSISTANT, stoppedContent)
         persistMessages(activeSessionId)
@@ -4275,48 +3756,38 @@ internal class DshHomePage : BasePager() {
     }
 
     private fun queueAssistantDelta(id: String, delta: String) {
-        if (delta.isEmpty()) return
-        if (!streaming || streamingAssistantRootId != id) return
-        ensureStreamingAssistantSegment()
-        pendingAssistantDelta.append(delta)
-        val firstPaint = streamingAssistantContent.isEmpty()
-        if (assistantFlushScheduled && !firstPaint) return
-        assistantFlushScheduled = true
-        setTimeout(pagerId, if (firstPaint) 0 else STREAM_FLUSH_INTERVAL_MS) {
+        val decision = ConversationCoordinator.onAssistantDelta(streamCursor(), id, delta) ?: return
+        applyCursor(decision.cursor)
+        if (decision.insertRow) insertLiveAssistantRow()
+        if (!decision.scheduleFlush) return
+        val token = session.generationToken
+        val delay = if (decision.firstPaint) 0 else STREAM_FLUSH_INTERVAL_MS
+        setTimeout(pagerId, delay) {
+            if (!session.accepts(token)) return@setTimeout
             assistantFlushScheduled = false
             flushAssistantDelta()
         }
     }
 
     private fun queueReasoningDelta(id: String, delta: String) {
-        if (delta.isEmpty() || streamingReasoningId != id) return
-        streamingReasoningContent += delta
-        val index = messages.indexOfFirst { it.id == id }
-        if (index >= 0) {
-            messages[index] = messages[index].copy(
-                content = streamingReasoningContent,
-                streaming = true,
-                isReasoning = true,
-            )
-        } else {
-            freshMessageIds.add(id)
-            messages.add(DshMessage(id, DshMessageRole.ASSISTANT, streamingReasoningContent, streaming = true, isReasoning = true))
-        }
+        val existing = messages.firstOrNull { it.id == id }
+        val decision = ConversationCoordinator.onReasoningDelta(streamCursor(), id, delta, existing) ?: return
+        applyCursor(decision.cursor)
+        if (existing == null) freshMessageIds.add(id)
+        session.apply(ConversationAction.UpsertMessage(decision.message))
         realizeVisibleMessages()
         if (followListTail) scrollMessagesToEnd()
     }
 
     private fun flushAssistantDelta() {
-        if (streamingAssistantId.isEmpty() || pendingAssistantDelta.isEmpty()) return
-        streamingAssistantContent += pendingAssistantDelta.toString()
-        pendingAssistantDelta.setLength(0)
+        val decision = ConversationCoordinator.flush(streamCursor()) ?: return
+        applyCursor(decision.cursor)
         DshStreamLog.i(
             "ui.flush id=$streamingAssistantId chars=${streamingAssistantContent.length} preview='${DshStreamLog.preview(streamingAssistantContent)}'",
         )
-        // Keep the ObservableList row stable while tokens arrive. `messages[i] =
-        // copy()` is remove+add; LazyLoop treats an append at currentEnd as
-        // "behind the visible range" and will not build the cell until scroll.
-        // DshMarkdown already reads `streamingAssistantContent` via liveContent.
+        // Keep the ObservableList row stable while tokens arrive. Replacing the
+        // row on every token makes LazyLoop treat the cell as newly appended.
+        // DshMarkdown reads streamingAssistantContent while the turn is live.
         insertLiveAssistantRow()
         ensureLiveMessageCell()
         refreshSessionRenderTree(activeSessionId)
@@ -4329,31 +3800,16 @@ internal class DshHomePage : BasePager() {
      * placed after that card instead of being appended to the old row.
      */
     private fun ensureStreamingAssistantSegment() {
-        if (streamingAssistantId.isNotEmpty()) return
-        if (streamingAssistantRootId.isEmpty()) return
-        val id = if (streamingAssistantSegment == 0) {
-            streamingAssistantRootId
-        } else {
-            "$streamingAssistantRootId-segment-${streamingAssistantSegment}"
-        }
-        streamingAssistantId = id
-        if (streamingAssistantContent.isEmpty() && pendingAssistantDelta.isEmpty()) {
-            // Inserting an empty assistant into a brand-new List (only the user
-            // bubble) is "add behind currentEnd". LazyLoop will not build that
-            // cell until a real scroll, and DshMessageRow also skips mounting
-            // Markdown when the first paint is empty. Wait for the first flush.
-            return
-        }
-        insertLiveAssistantRow()
+        val decision = ConversationCoordinator.ensureSegment(streamCursor())
+        applyCursor(decision.cursor)
+        if (decision.insertRow) insertLiveAssistantRow()
     }
 
     private fun insertLiveAssistantRow() {
         val id = streamingAssistantId
         if (id.isEmpty() || messages.any { it.id == id }) return
-        // Keep content empty until settle. The first-flush snapshot must not
-        // become the display source; DshMarkdown reads the live buffer.
         freshMessageIds.add(id)
-        messages.add(DshMessage(id, DshMessageRole.ASSISTANT, "", streaming = true))
+        session.apply(ConversationAction.EnsureStreamingRow(id))
         ensureLiveMessageCell()
     }
 
@@ -4378,46 +3834,40 @@ internal class DshHomePage : BasePager() {
 
     /** Close the current text row immediately before the next tool card. */
     private fun splitStreamingAssistantBeforeTool() {
-        if (!streaming || streamingAssistantRootId.isEmpty()) return
         flushAssistantDelta()
-        val id = streamingAssistantId
-        if (id.isNotEmpty()) {
-            val index = messages.indexOfFirst { it.id == id }
-            if (index >= 0) {
-                val current = messages[index]
-                val text = current.content.ifEmpty { streamingAssistantContent }
-                if (text.isEmpty()) {
-                    messages.removeAt(index)
-                } else {
-                    messages[index] = current.copy(content = text, streaming = false)
-                    realizeVisibleMessages()
-                }
+        val row = messages.firstOrNull { it.id == streamingAssistantId }
+        when (val decision = ConversationCoordinator.splitBeforeTool(streamCursor(), row)) {
+            SplitText.Ignore -> return
+            is SplitText.Advance -> applyCursor(decision.cursor)
+            is SplitText.Remove -> {
+                session.apply(ConversationAction.RemoveMessage(decision.messageId))
+                applyCursor(decision.cursor)
+            }
+            is SplitText.Close -> {
+                session.apply(ConversationAction.UpsertMessage(decision.message))
+                realizeVisibleMessages()
+                applyCursor(decision.cursor)
             }
         }
-        streamingAssistantId = ""
-        streamingAssistantContent = ""
-        streamingAssistantSegment += 1
-        pendingAssistantDelta.setLength(0)
-        assistantFlushScheduled = false
     }
 
     private fun updateStreamingMessage(content: String, streaming: Boolean, isReasoning: Boolean = false) {
-        val index = messages.indexOfFirst { it.id == streamingAssistantId }
-        if (index < 0) return
-        messages[index] = messages[index].copy(
+        val id = streamingAssistantId
+        if (id.isEmpty()) return
+        val current = messages.firstOrNull { it.id == id } ?: return
+        session.apply(ConversationAction.UpsertMessage(current.copy(
             content = content,
             streaming = streaming,
             isReasoning = isReasoning,
-        )
-        if (index >= messages.size - 1) realizeVisibleMessages()
+        )))
+        if (messages.indexOfFirst { it.id == id } >= messages.size - 1) realizeVisibleMessages()
     }
 
     private fun finalizeStreamingReasoning() {
-        if (streamingReasoningId.isEmpty()) return
-        val index = messages.indexOfFirst { it.id == streamingReasoningId }
-        if (index >= 0) {
-            messages[index] = messages[index].copy(streaming = false, isReasoning = true)
-        }
+        val id = streamingReasoningId
+        if (id.isEmpty()) return
+        val current = messages.firstOrNull { it.id == id } ?: return
+        session.apply(ConversationAction.UpsertMessage(current.copy(streaming = false, isReasoning = true)))
     }
 
     private fun consumeFreshMessage(id: String): Boolean = freshMessageIds.remove(id)
@@ -4514,73 +3964,58 @@ internal class DshHomePage : BasePager() {
     private fun messageRowKey(sessionId: String, messageId: String): String = "$sessionId:$messageId"
 
     private fun settleStreamingMessage(role: DshMessageRole, content: String) {
-        val id = streamingAssistantId
-        if (id.isNotEmpty()) {
-            val sessionId = activeSessionId
-            val finalContent = content.ifEmpty { streamingAssistantContent }
-            finalizeStreamingReasoning()
-            val index = messages.indexOfFirst { it.id == id }
-            if (index >= 0) {
-                messages[index] = messages[index].copy(
-                    role = role,
-                    content = finalContent,
-                    streaming = false,
-                )
-            } else {
-                messages.add(DshMessage(id, role, finalContent, streaming = false))
+        val token = session.generationToken
+        when (val decision = ConversationCoordinator.settle(streamCursor(), role, content)) {
+            is SettledStream.Release -> {
+                applyCursor(decision.cursor)
+                session.apply(ConversationAction.ReleaseStreamingTurn)
+                syncTurnStatusTicker()
             }
-            realizeVisibleMessages()
-            DshStreamLog.i(
-                "ui.settle id=$id role=$role index=$index chars=${finalContent.length} preview='${DshStreamLog.preview(finalContent)}'",
-            )
-            streamingReasoningId = ""
-            streamingReasoningContent = ""
-            pendingAssistantDelta.setLength(0)
-            stopButtonVisible = false
-            streaming = false
-            streamingAssistantContent = finalContent
-            syncTurnStatusTicker()
-            addTaskWhenPagerUpdateLayoutFinish {
-                if (activeSessionId != sessionId) return@addTaskWhenPagerUpdateLayoutFinish
-                if (!streaming && streamingAssistantId == id) {
-                    val stored = messages.firstOrNull { it.id == id }?.content.orEmpty()
-                    if (stored.length >= finalContent.length) {
-                        streamingAssistantId = ""
-                        streamingAssistantRootId = ""
-                        streamingAssistantSegment = 0
-                        streamingTurnAnchorAssistantId = ""
-                        if (streamingAssistantContent == finalContent) {
-                            streamingAssistantContent = ""
+            is SettledStream.Message -> {
+                val id = decision.message.id
+                val sessionId = activeSessionId
+                val finalContent = decision.message.content
+                finalizeStreamingReasoning()
+                session.apply(ConversationAction.UpsertMessage(decision.message))
+                applyCursor(decision.cursor)
+                session.apply(ConversationAction.CloseStreamingTurn(finalContent))
+                realizeVisibleMessages()
+                DshStreamLog.i(
+                    "ui.settle id=$id role=$role chars=${finalContent.length} preview='${DshStreamLog.preview(finalContent)}'",
+                )
+                syncTurnStatusTicker()
+                addTaskWhenPagerUpdateLayoutFinish {
+                    if (!session.accepts(token) || activeSessionId != sessionId) return@addTaskWhenPagerUpdateLayoutFinish
+                    if (!streaming && streamingAssistantId == id) {
+                        val stored = messages.firstOrNull { it.id == id }?.content.orEmpty()
+                        if (stored.length >= finalContent.length) {
+                            streamingAssistantId = ""
+                            streamingAssistantRootId = ""
+                            streamingAssistantSegment = 0
+                            streamingTurnAnchorAssistantId = ""
+                            if (streamingAssistantContent == finalContent) {
+                                streamingAssistantContent = ""
+                            }
+                        }
+                    }
+                    refreshSessionRenderTree(sessionId)
+                    sessionRenderLog("stream.render.layout session=$sessionId messages=${messages.size}")
+                    setTimeout(pagerId, 16) {
+                        if (!session.accepts(token) || activeSessionId != sessionId) return@setTimeout
+                        addTaskWhenPagerUpdateLayoutFinish {
+                            if (!session.accepts(token) || activeSessionId != sessionId) return@addTaskWhenPagerUpdateLayoutFinish
+                            refreshSessionRenderTree(sessionId)
+                            sessionRenderLog("stream.render.refresh session=$sessionId messages=${messages.size}")
                         }
                     }
                 }
-                refreshSessionRenderTree(sessionId)
-                sessionRenderLog("stream.render.layout session=$sessionId messages=${messages.size}")
-                setTimeout(pagerId, 16) {
-                    if (activeSessionId != sessionId) return@setTimeout
-                    addTaskWhenPagerUpdateLayoutFinish {
-                        if (activeSessionId != sessionId) return@addTaskWhenPagerUpdateLayoutFinish
-                        refreshSessionRenderTree(sessionId)
-                        sessionRenderLog("stream.render.refresh session=$sessionId messages=${messages.size}")
-                    }
-                }
             }
-            return
         }
-        releaseStreamingUi()
     }
 
     private fun releaseStreamingUi() {
-        streamingAssistantId = ""
-        streamingAssistantRootId = ""
-        streamingAssistantSegment = 0
-        streamingTurnAnchorAssistantId = ""
-        streamingReasoningId = ""
-        streamingReasoningContent = ""
-        pendingAssistantDelta.setLength(0)
-        streaming = false
-        stopButtonVisible = false
-        streamingAssistantContent = ""
+        applyCursor(ConversationCoordinator.releasedCursor())
+        session.apply(ConversationAction.ReleaseStreamingTurn)
         syncTurnStatusTicker()
     }
 
@@ -4635,10 +4070,171 @@ internal class DshHomePage : BasePager() {
         }
     }
 
+    private inner class PageHistoryHost : SessionHistoryHost {
+        override val isRemoteHost: Boolean get() = this@DshHomePage.isRemoteHost
+        override val activeSessionId: String get() = this@DshHomePage.activeSessionId
+        override val sessionRunning: Boolean get() = this@DshHomePage.sessionRunning
+        override val streaming: Boolean get() = this@DshHomePage.streaming
+        override val stopButtonVisible: Boolean get() = this@DshHomePage.stopButtonVisible
+        override val streamingAssistantRootId: String get() = this@DshHomePage.streamingAssistantRootId
+        override val messageCount: Int get() = messages.size
+        override val activeConnectionId: String get() = this@DshHomePage.activeConnectionId
+        override var connectionLabel: String
+            get() = this@DshHomePage.connectionLabel
+            set(value) { this@DshHomePage.connectionLabel = value }
+        override var historyRequestGeneration: Int
+            get() = this@DshHomePage.historyRequestGeneration
+            set(value) { this@DshHomePage.historyRequestGeneration = value }
+        override var messages
+            get() = this@DshHomePage.messages
+            set(value) { this@DshHomePage.messages = value }
+        override fun repository() = this@DshHomePage.repository
+        override fun generationToken() = session.generationToken
+        override fun accepts(token: Long) = session.accepts(token)
+        override fun sessionMessageState(sessionId: String, scrollToEndAfterLoad: Boolean) =
+            this@DshHomePage.sessionMessageState(sessionId, scrollToEndAfterLoad = scrollToEndAfterLoad)
+        override fun ensureConversationPanel(sessionId: String) = this@DshHomePage.ensureConversationPanel(sessionId)
+        override fun loadSkills(sessionId: String) = this@DshHomePage.loadSkills(sessionId)
+        override fun loadWebTimeline(sessionId: String, scrollToEndAfterLoad: Boolean, forceReplace: Boolean, afterApply: () -> Unit) =
+            this@DshHomePage.loadWebTimeline(sessionId, scrollToEndAfterLoad, forceReplace, afterApply)
+        override fun markMessageReady(sessionId: String) { sessionMessageReady.add(sessionId) }
+        override fun markCache(sessionId: String, state: DshSessionCacheState) { sessionCacheStates[sessionId] = state }
+        override fun replaceMessagesIfChanged(loaded: List<DshMessage>, force: Boolean) =
+            this@DshHomePage.replaceMessagesIfChanged(loaded, force)
+        override fun replaceStoredMessages(sessionId: String, loaded: List<DshMessage>) {
+            runCatching { localStore?.replaceMessages(activeConnectionId, sessionId, loaded) }
+        }
+        override fun completePendingSessionSelection(sessionId: String) =
+            this@DshHomePage.completePendingSessionSelection(sessionId)
+        override fun realizeSessionAfterData(sessionId: String, scrollToEndAfterLoad: Boolean) =
+            this@DshHomePage.realizeSessionAfterData(sessionId, scrollToEndAfterLoad)
+        override fun resumeStreamingFromHistory(sessionId: String, reason: String) =
+            this@DshHomePage.resumeStreamingFromHistory(sessionId, reason)
+        override fun finishStreamingFromHistory(sessionId: String) =
+            this@DshHomePage.finishStreamingFromHistory(sessionId)
+    }
+
+    private inner class HomeConnectionEvents : DshConnectionEvents {
+        override fun activeSessionId(): String = this@DshHomePage.activeSessionId
+
+        override fun syncTurnStatus() = syncTurnStatusTicker()
+
+        override fun loadRepository(preferredSessionId: String?) {
+            this@DshHomePage.loadRepository(preferredSessionId)
+        }
+
+        override fun probeSessionLifecycle() = this@DshHomePage.probeSessionLifecycle()
+
+        override fun dismissKeyboard() = this@DshHomePage.dismissKeyboard()
+
+        override fun closeSessionDrawer() = this@DshHomePage.closeSessionDrawer()
+
+        override fun hideAppSettingsHub() {
+            appSettingsHubVisible = false
+        }
+
+        override fun openConnectionSetup() {
+            acquireModule<RouterModule>(RouterModule.MODULE_NAME).openPage(
+                "connection_setup",
+                JSONObject().apply { put("pageName", "connection_setup") },
+            )
+        }
+
+        override fun clearGoalAndStream() {
+            goalSnapshot = null
+            goalActionBusy = false
+            goalActionError = ""
+            streamHandle?.cancel()
+            streamHandle = null
+        }
+
+        override fun clearApiKeyInput() {
+            apiKeyDraft = ""
+            apiKeyInputView?.setText("")
+        }
+
+        override fun onLocalEngineError(error: String) {
+            messages.clear()
+            messages.add(DshMessage(
+                "engine-start-error",
+                DshMessageRole.ERROR,
+                "本地 DeepSeek Harness 内核暂未就绪：$error",
+            ))
+        }
+
+        override fun onQueueSnapshot(sessionId: String) {
+            if (sessionId == this@DshHomePage.activeSessionId) {
+                refreshQueueDock()
+                refreshPendingInteractions()
+            }
+        }
+
+        override fun onJobsSnapshot(sessionId: String) {
+            if (sessionId == this@DshHomePage.activeSessionId) refreshJobsPanel()
+        }
+
+        override fun onSessionStatus(sessionId: String, running: Boolean) {
+            if (sessionId == this@DshHomePage.activeSessionId) {
+                val wasRunning = sessionRunning
+                sessionRunning = running
+                if (wasRunning != running) {
+                    history.resyncStreamingWithHost(
+                        sessionId,
+                        if (running) "host-session-running" else "host-session-idle",
+                    )
+                }
+                syncTurnStatusTicker()
+            }
+        }
+
+        override fun onProjection(sessionId: String, key: String, value: String, seq: Int) {
+            if (sessionId == this@DshHomePage.activeSessionId) {
+                when (key) {
+                    "title" -> {
+                        val title = value.trim().removeSurrounding("\"")
+                        if (title.isNotEmpty()) connectionLabel = title
+                    }
+                    "goal" -> goalSnapshot = parseGoalProjection(value)
+                    "imageLimits" -> {
+                        parseDshImageLimits(value)?.let {
+                            imageLimits = it
+                            imageLimitsKnown = true
+                        }
+                    }
+                }
+            }
+        }
+
+        override fun onSessionEvent(sessionId: String, event: DshRawSessionEvent) {
+            if (sessionId == this@DshHomePage.activeSessionId) {
+                when (event.type) {
+                    "tool/call" -> showRunningTool(event)
+                    "tool/result" -> settleRunningTool(event)
+                    "user/message" -> showContextInjection(event)
+                    "assistant/message" -> showAssistantBlocks(event)
+                }
+            }
+        }
+
+        override fun onRemoteEvent(event: String) {
+            if (this@DshHomePage.activeSessionId.isNotEmpty() && isRemoteCatalogInvalidationEvent(event)) {
+                loadSkills(this@DshHomePage.activeSessionId)
+                loadModels(this@DshHomePage.activeSessionId)
+            }
+        }
+
+        override fun onArchivedSessionsChanged() = handleArchivedSessionsChanged()
+
+        override fun onPendingInteraction(sessionId: String) {
+            DshStreamLog.question("ui.pending-frame session=$sessionId active=${this@DshHomePage.activeSessionId}")
+            if (sessionId == this@DshHomePage.activeSessionId) {
+                refreshPendingInteractions()
+                loadWebTimeline(sessionId, scrollToEndAfterLoad = true)
+            }
+        }
+    }
+
     companion object {
-        private const val LOCAL_ENGINE_URL = "http://127.0.0.1:3080"
-        private const val ENGINE_CONNECT_RETRIES = 60
-        private const val ENGINE_RETRY_DELAY_MS = 1_000
         private const val ANIMATION_DURATION_MS = 240
         private const val ANIMATION_DURATION_S = 0.24f
         private const val STREAM_FLUSH_INTERVAL_MS = 16

@@ -1,5 +1,6 @@
 package com.example.dsh.dsh
 
+import com.example.dsh.host.parser.parseHostRpcBody
 import com.tencent.kuikly.core.nvi.serialization.json.JSONObject
 import kotlin.test.Test
 import kotlin.test.assertEquals

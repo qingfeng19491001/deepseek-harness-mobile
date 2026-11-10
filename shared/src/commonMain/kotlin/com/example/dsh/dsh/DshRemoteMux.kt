@@ -1,5 +1,6 @@
 package com.example.dsh.dsh
 
+import com.example.dsh.host.protocol.DshHostProtocol
 import com.tencent.kuikly.core.nvi.serialization.json.JSONArray
 import com.tencent.kuikly.core.nvi.serialization.json.JSONObject
 
